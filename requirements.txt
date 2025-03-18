@@ -1,0 +1,7 @@
+Flask==2.3.3
+Werkzeug==2.3.7
+gunicorn==20.1.0
+PyGithub==1.59.1
+numpy==1.24.3
+jax==0.4.23
+jaxlib==0.4.23
