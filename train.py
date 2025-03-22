@@ -18,7 +18,7 @@ def main():
     }
 
     #  Создаем агента
-    agent = ai_engine.CFRAgent(iterations=500000, batch_size=100, stop_threshold=0.001, max_nodes=100000)
+    agent = ai_engine.CFRAgent(iterations=500000, batch_size=100, stop_threshold=0.001, max_nodes=100000, ai_settings=ai_settings) # <---- Исправление: передаем ai_settings
 
     #  Загружаем прогресс (если есть)
     agent.load_progress()
