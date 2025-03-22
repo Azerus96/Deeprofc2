@@ -180,8 +180,6 @@ class GameState:
 
     def apply_action(self, action: Dict[str, List[Card]]) -> "GameState":
         """Applies an action to the current state and returns the new state."""
-        print("GameState.apply_action - START") # Debug print
-        print(f"GameState.apply_action - action type: {type(action)}, action value: {action}") # Debug print
         new_board = Board()
         new_board.top = self.board.top + action.get("top", [])
         new_board.middle = self.board.middle + action.get("middle", [])
@@ -207,7 +205,7 @@ class GameState:
             deck=self.deck[:],
         )
         new_game_state.remaining_cards = new_game_state.calculate_remaining_cards() # Пересчитываем remaining_cards
-        print("GameState.apply_action - END") # Debug print
+
         return new_game_state
 
     def get_information_set(self, visible_opponent_cards: Optional[List[Card]] = None) -> str:
@@ -265,63 +263,19 @@ class GameState:
         opponent_total_royalty = sum(opponent_royalties.values())
 
         #  Сравнение линий (scoring 1-6)
-        print("GameState.get_payoff - evaluate_hand bottom (player):") # Debug print
-        print(f"GameState.get_payoff - board.bottom type: {type(self.board.bottom)}, board.bottom value: {self.board.bottom}") # Debug print
-        bottom_player_jax = jnp.array([card_to_array(card) for card in self.board.bottom])
-        print(f"GameState.get_payoff - bottom_player_jax type: {type(bottom_player_jax)}, bottom_player_jax value: {bottom_player_jax}") # Debug print
-        player_bottom_rank = self.evaluate_hand(bottom_player_jax)[0]
-        print(f"GameState.get_payoff - player_bottom_rank: {player_bottom_rank}") # Debug print
-
-        print("GameState.get_payoff - evaluate_hand bottom (opponent):") # Debug print
-        print(f"GameState.get_payoff - opponent_board.bottom type: {type(opponent_board.bottom)}, opponent_board.bottom value: {opponent_board.bottom}") # Debug print
-        bottom_opponent_jax = jnp.array([card_to_array(card) for card in opponent_board.bottom])
-        print(f"GameState.get_payoff - bottom_opponent_jax type: {type(bottom_opponent_jax)}, bottom_opponent_jax value: {bottom_opponent_jax}") # Debug print
-        opponent_bottom_rank = self.evaluate_hand(bottom_opponent_jax)[0]
-        print(f"GameState.get_payoff - opponent_bottom_rank: {opponent_bottom_rank}") # Debug print
-
-
-        if player_bottom_rank < opponent_bottom_rank:
+        if self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.bottom]))[0] < self.evaluate_hand(jnp.array([card_to_array(card) for card in opponent_board.bottom]))[0]:
             my_line_wins += 1
-        elif player_bottom_rank > opponent_bottom_rank:
+        elif self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.bottom]))[0] > self.evaluate_hand(jnp.array([card_to_array(card) for card in opponent_board.bottom]))[0]:
             my_line_wins -= 1
 
-        print("GameState.get_payoff - evaluate_hand middle (player):") # Debug print
-        print(f"GameState.get_payoff - board.middle type: {type(self.board.middle)}, board.middle value: {self.board.middle}") # Debug print
-        middle_player_jax = jnp.array([card_to_array(card) for card in self.board.middle])
-        print(f"GameState.get_payoff - middle_player_jax type: {type(middle_player_jax)}, middle_player_jax value: {middle_player_jax}") # Debug print
-        player_middle_rank = self.evaluate_hand(middle_player_jax)[0]
-        print(f"GameState.get_payoff - player_middle_rank: {player_middle_rank}") # Debug print
-
-        print("GameState.get_payoff - evaluate_hand middle (opponent):") # Debug print
-        print(f"GameState.get_payoff - opponent_board.middle type: {type(opponent_board.middle)}, opponent_board.middle value: {opponent_board.middle}") # Debug print
-        middle_opponent_jax = jnp.array([card_to_array(card) for card in opponent_board.middle])
-        print(f"GameState.get_payoff - middle_opponent_jax type: {type(middle_opponent_jax)}, middle_opponent_jax value: {middle_opponent_jax}") # Debug print
-        opponent_middle_rank = self.evaluate_hand(middle_opponent_jax)[0]
-        print(f"GameState.get_payoff - opponent_middle_rank: {opponent_middle_rank}") # Debug print
-
-        if player_middle_rank < opponent_middle_rank:
+        if self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.middle]))[0] < self.evaluate_hand(jnp.array([card_to_array(card) for card in opponent_board.middle]))[0]:
             my_line_wins += 1
-        elif player_middle_rank > opponent_middle_rank:
+        elif self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.middle]))[0] > self.evaluate_hand(jnp.array([card_to_array(card) for card in opponent_board.middle]))[0]:
             my_line_wins -= 1
 
-        print("GameState.get_payoff - evaluate_hand top (player):") # Debug print
-        print(f"GameState.get_payoff - board.top type: {type(self.board.top)}, board.top value: {self.board.top}") # Debug print
-        top_player_jax = jnp.array([card_to_array(card) for card in self.board.top])
-        print(f"GameState.get_payoff - top_player_jax type: {type(top_player_jax)}, top_player_jax value: {top_player_jax}") # Debug print
-        player_top_rank = self.evaluate_hand(top_player_jax)[0]
-        print(f"GameState.get_payoff - player_top_rank: {player_top_rank}") # Debug print
-
-        print("GameState.get_payoff - evaluate_hand top (opponent):") # Debug print
-        print(f"GameState.get_payoff - opponent_board.top type: {type(opponent_board.top)}, opponent_board.top value: {opponent_board.top}") # Debug print
-        top_opponent_jax = jnp.array([card_to_array(card) for card in opponent_board.top])
-        print(f"GameState.get_payoff - top_opponent_jax type: {type(top_opponent_jax)}, top_opponent_jax value: {top_opponent_jax}") # Debug print
-        opponent_top_rank = self.evaluate_hand(top_opponent_jax)[0]
-        print(f"GameState.get_payoff - opponent_top_rank: {opponent_top_rank}") # Debug print
-
-
-        if player_top_rank < opponent_top_rank:
+        if self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.top]))[0] < self.evaluate_hand(jnp.array([card_to_array(card) for card in opponent_board.top]))[0]:
             my_line_wins += 1
-        elif player_top_rank > opponent_top_rank:
+        elif self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.top]))[0] > self.evaluate_hand(jnp.array([card_to_array(card) for card in opponent_board.top]))[0]:
             my_line_wins -= 1
 
         #  Скуп (scoop)
@@ -347,29 +301,11 @@ class GameState:
         if not self.board.is_full():
             return False
 
-        print("GameState.is_dead_hand - evaluate_hand top:") # Debug print
-        print(f"GameState.is_dead_hand - board.top type: {type(self.board.top)}, board.top value: {self.board.top}") # Debug print
-        top_cards_jax = jnp.array([card_to_array(card) for card in self.board.top])
-        print(f"GameState.is_dead_hand - top_cards_jax type: {type(top_cards_jax)}, top_cards_jax value: {top_cards_jax}") # Debug print
-        top_rank_dead_hand = self.evaluate_hand(top_cards_jax)[0]
-        print(f"GameState.is_dead_hand - top_rank_dead_hand: {top_rank_dead_hand}") # Debug print
+        top_rank, _ = self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.top]))
+        middle_rank, _ = self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.middle]))
+        bottom_rank, _ = self.evaluate_hand(jnp.array([card_to_array(card) for card in self.board.bottom]))
 
-        print("GameState.is_dead_hand - evaluate_hand middle:") # Debug print
-        print(f"GameState.is_dead_hand - board.middle type: {type(self.board.middle)}, board.middle value: {self.board.middle}") # Debug print
-        middle_cards_jax = jnp.array([card_to_array(card) for card in self.board.middle])
-        print(f"GameState.is_dead_hand - middle_cards_jax type: {type(middle_cards_jax)}, middle_cards_jax value: {middle_cards_jax}") # Debug print
-        middle_rank_dead_hand = self.evaluate_hand(middle_cards_jax)[0]
-        print(f"GameState.is_dead_hand - middle_rank_dead_hand: {middle_rank_dead_hand}") # Debug print
-
-        print("GameState.is_dead_hand - evaluate_hand bottom:") # Debug print
-        print(f"GameState.is_dead_hand - board.bottom type: {type(self.board.bottom)}, board.bottom value: {self.board.bottom}") # Debug print
-        bottom_cards_jax = jnp.array([card_to_array(card) for card in self.board.bottom])
-        print(f"GameState.is_dead_hand - bottom_cards_jax type: {type(bottom_cards_jax)}, bottom_cards_jax value: {bottom_cards_jax}") # Debug print
-        bottom_rank_dead_hand = self.evaluate_hand(bottom_cards_jax)[0]
-        print(f"GameState.is_dead_hand - bottom_rank_dead_hand: {bottom_rank_dead_hand}") # Debug print
-
-
-        return top_rank_dead_hand > middle_rank_dead_hand or middle_rank_dead_hand > bottom_rank_dead_hand
+        return top_rank > middle_rank or middle_rank > bottom_rank
 
     def is_valid_fantasy_entry(self, board: Optional[Board] = None) -> bool:
         """Checks if an action leads to a valid fantasy mode entry."""
@@ -380,17 +316,11 @@ class GameState:
         if temp_state.is_dead_hand():
             return False
 
-        print("GameState.is_valid_fantasy_entry - evaluate_hand top:") # Debug print
-        print(f"GameState.is_valid_fantasy_entry - board.top type: {type(board.top)}, board.top value: {board.top}") # Debug print
-        top_cards_jax_fantasy_entry = jnp.array([card_to_array(card) for card in board.top])
-        print(f"GameState.is_valid_fantasy_entry - top_cards_jax_fantasy_entry type: {type(top_cards_jax_fantasy_entry)}, top_cards_jax_fantasy_entry value: {top_cards_jax_fantasy_entry}") # Debug print
-        top_rank_fantasy_entry = temp_state.evaluate_hand(top_cards_jax_fantasy_entry)[0]
-        print(f"GameState.is_valid_fantasy_entry - top_rank_fantasy_entry: {top_rank_fantasy_entry}") # Debug print
-
-        if top_rank_fantasy_entry == 8: # Пара
+        top_rank, _ = temp_state.evaluate_hand(jnp.array([card_to_array(card) for card in board.top]))
+        if top_rank == 8: # Пара
             if board.top[0].rank == board.top[1].rank:
                 return board.top[0].rank in ["Q", "K", "A"] # Проверяем что QQ или старше
-        elif top_rank_fantasy_entry == 7: # Сет
+        elif top_rank == 7: # Сет
             return True
         return False
 
@@ -403,32 +333,19 @@ class GameState:
         if temp_state.is_dead_hand():
             return False
 
-        print("GameState.is_valid_fantasy_repeat - evaluate_hand top:") # Debug print
-        print(f"GameState.is_valid_fantasy_repeat - board.top type: {type(board.top)}, board.top value: {board.top}") # Debug print
-        top_cards_jax_fantasy_repeat = jnp.array([card_to_array(card) for card in board.top])
-        print(f"GameState.is_valid_fantasy_repeat - top_cards_jax_fantasy_repeat type: {type(top_cards_jax_fantasy_repeat)}, top_cards_jax_fantasy_repeat value: {top_cards_jax_fantasy_repeat}") # Debug print
-        top_rank_fantasy_repeat = temp_state.evaluate_hand(top_cards_jax_fantasy_repeat)[0]
-        print(f"GameState.is_valid_fantasy_repeat - top_rank_fantasy_repeat: {top_rank_fantasy_repeat}") # Debug print
-
-        print("GameState.is_valid_fantasy_repeat - evaluate_hand bottom:") # Debug print
-        print(f"GameState.is_valid_fantasy_repeat - board.bottom type: {type(board.bottom)}, board.bottom value: {board.bottom}") # Debug print
-        bottom_cards_jax_fantasy_repeat = jnp.array([card_to_array(card) for card in board.bottom])
-        print(f"GameState.is_valid_fantasy_repeat - bottom_cards_jax_fantasy_repeat type: {type(bottom_cards_jax_fantasy_repeat)}, bottom_cards_jax_fantasy_repeat value: {bottom_cards_jax_fantasy_repeat}") # Debug print
-        bottom_rank_fantasy_repeat = temp_state.evaluate_hand(bottom_cards_jax_fantasy_repeat)[0]
-        print(f"GameState.is_valid_fantasy_repeat - bottom_rank_fantasy_repeat: {bottom_rank_fantasy_repeat}") # Debug print
-
-
+        top_rank, _ = temp_state.evaluate_hand(jnp.array([card_to_array(card) for card in board.top]))
+        bottom_rank, _ = temp_state.evaluate_hand(jnp.array([card_to_array(card) for card in board.bottom]))
         if self.ai_settings['fantasyType'] == 'progressive':
-            if top_rank_fantasy_repeat == 7:
+            if top_rank == 7:
                 return True
-            elif bottom_rank_fantasy_repeat <= 3:
+            elif bottom_rank <= 3:
                 return True
             else:
                 return False
         else:
-            if top_rank_fantasy_repeat == 7:  # Сет в верхнем ряду
+            if top_rank == 7:  # Сет в верхнем ряду
                 return True
-            if bottom_rank_fantasy_repeat <= 3:  # Каре или лучше в нижнем ряду
+            if bottom_rank <= 3:  # Каре или лучше в нижнем ряду
                 return True
 
             return False
@@ -442,27 +359,15 @@ class GameState:
 
 def card_to_array(card: Optional[Card]) -> jnp.ndarray:
     """Преобразует Card в JAX-массив [rank, suit]."""
-    print("card_to_array - START") # Debug print
-    print(f"card_to_array - card type: {type(card)}, card value: {card}") # Debug print
     if card is None:
-        result = jnp.array([-1, -1], dtype=jnp.int32)  #  Пустой слот
-    else:
-        result = jnp.array([Card.RANKS.index(card.rank), Card.SUITS.index(card.suit)], dtype=jnp.int32)
-    print(f"card_to_array - result type: {type(result)}, result value: {result}") # Debug print
-    print("card_to_array - END") # Debug print
-    return result
+        return jnp.array([-1, -1], dtype=jnp.int32)  #  Пустой слот
+    return jnp.array([Card.RANKS.index(card.rank), Card.SUITS.index(card.suit)], dtype=jnp.int32)
 
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
-    print("array_to_card - START") # Debug print
-    print(f"array_to_card - card_array type: {type(card_array)}, card_array value: {card_array}") # Debug print
     if jnp.array_equal(card_array, jnp.array([-1, -1])):
-        result_card = None  #  Пустой слот
-    else:
-        result_card = Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
-    print(f"array_to_card - result_card type: {type(result_card)}, result_card value: {result_card}") # Debug print
-    print("array_to_card - END") # Debug print
-    return result_card
+        return None  #  Пустой слот
+    return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
 
 
 def generate_placements(cards_jax: jnp.ndarray, board: Board, ai_settings: Dict, max_combinations: int = 10000) -> jnp.ndarray:
@@ -470,8 +375,6 @@ def generate_placements(cards_jax: jnp.ndarray, board: Board, ai_settings: Dict,
     Генерирует все возможные *допустимые* размещения карт на доске (JAX-версия).
     Принимает и возвращает JAX-массивы.  Использует вложенные циклы и itertools.permutations.
     """
-    print("generate_placements - START") # Debug print
-    print(f"generate_placements - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
     num_cards = cards_jax.shape[0]
 
     free_slots_top = 3 - len(board.top)
@@ -541,9 +444,7 @@ def generate_placements(cards_jax: jnp.ndarray, board: Board, ai_settings: Dict,
 
     all_placements = []
     for comb in valid_combinations:
-        print("generate_placements - comb in valid_combinations loop - comb type:", type(comb), "comb value:", comb) # Debug print
         for perm in itertools.permutations(cards_jax):  # Оставляем itertools.permutations
-            print("generate_placements - perm in itertools.permutations loop - perm type:", type(perm), "perm value:", perm) # Debug print
             perm = jnp.array(perm)
             placement = jnp.full((14, 2), -1, dtype=jnp.int32)
             top_indices = jnp.where(comb == 0)[0]
@@ -556,15 +457,12 @@ def generate_placements(cards_jax: jnp.ndarray, board: Board, ai_settings: Dict,
             all_placements.append(placement)
 
     all_placements = jnp.array(all_placements)
-    print("generate_placements - all_placements type before filtering:", type(all_placements), "all_placements shape:", all_placements.shape) # Debug print
 
     #  Фильтруем недопустимые размещения (dead hand) - JAX-версия
     is_dead_hand_vmap = jax.vmap(is_dead_hand_jax)  #  Векторизуем функцию проверки
-    print("generate_placements - calling is_dead_hand_vmap") # Debug print
     dead_hands = is_dead_hand_vmap(all_placements, ai_settings)
     valid_placements = all_placements[~dead_hands] #  Используем маску для фильтрации
-    print("generate_placements - valid_placements type after filtering:", type(valid_placements), "valid_placements shape:", valid_placements.shape) # Debug print
-    print("generate_placements - END") # Debug print
+
     return valid_placements
 
 
@@ -573,29 +471,22 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
     Возвращает JAX-массив возможных действий для данного состояния игры.
     """
     logger.debug("get_actions - START")
-    print("get_actions - START") # Debug print
     if game_state.is_terminal():
         logger.debug("get_actions - Game is terminal, returning empty actions")
-        print("get_actions - Game is terminal, returning empty actions") # Debug print
         return jnp.array([])
 
     num_cards = len(game_state.selected_cards)
     actions = []
 
     if num_cards > 0:
-        print("get_actions - game_state.selected_cards.cards type:", type(game_state.selected_cards.cards), "value:", game_state.selected_cards.cards) # Debug print
-        selected_cards_jax_list = [card_to_array(card) for card in game_state.selected_cards.cards]
-        selected_cards_jax = jnp.array(selected_cards_jax_list)
-        print("get_actions - selected_cards_jax type:", type(selected_cards_jax), "value:", selected_cards_jax) # Debug print
+        selected_cards_jax = jnp.array([[Card.RANKS.index(card.rank), Card.SUITS.index(card.suit)] for card in game_state.selected_cards.cards])
 
         # Режим фантазии
         if game_state.ai_settings.get("fantasyMode", False):
-            print("get_actions - Fantasy Mode - START") # Debug print
             #  1.  Сначала проверяем, можем ли мы ОСТАТЬСЯ в "Фантазии"
             can_repeat = False
             if game_state.ai_settings.get("fantasyType") == "progressive":
                 #  Для progressive fantasy repeat - сет вверху или каре (и лучше) внизу
-                print("get_actions - Progressive Fantasy Repeat Check - START") # Debug print
                 for p in itertools.permutations(range(num_cards)):
                     action = jnp.full((14, 2), -1, dtype=jnp.int32)
                     for i in range(3):
@@ -617,10 +508,8 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
                         can_repeat = True
                         actions.append(action)
                         break  #  Если нашли хоть одно, дальше не ищем
-                print("get_actions - Progressive Fantasy Repeat Check - END, can_repeat:", can_repeat) # Debug print
             else:
                 #  Для обычной "Фантазии" - сет вверху или каре (и лучше) внизу
-                print("get_actions - Regular Fantasy Repeat Check - START") # Debug print
                 for p in itertools.permutations(range(num_cards)):  #  Все перестановки
                     action = jnp.full((14, 2), -1, dtype=jnp.int32)
                     for i in range(3):
@@ -643,12 +532,10 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
                         can_repeat = True
                         actions.append(action)
                         break
-                print("get_actions - Regular Fantasy Repeat Check - END, can_repeat:", can_repeat) # Debug print
 
             #  2.  Если остаться в "Фантазии" нельзя (или не были в ней),
             #      генерируем все допустимые действия и выбираем лучшее по роялти
             if not can_repeat:
-                print("get_actions - Fantasy No Repeat - Generating Possible Actions - START") # Debug print
                 possible_actions = []
                 for p in itertools.permutations(range(num_cards)):
                     action = jnp.full((14, 2), -1, dtype=jnp.int32)
@@ -685,28 +572,21 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
                             best_action = action
                     if best_action is not None:
                         actions.append(best_action)
-                print("get_actions - Fantasy No Repeat - Generating Possible Actions - END, actions count:", len(actions)) # Debug print
-            print("get_actions - Fantasy Mode - END") # Debug print
 
         # Особый случай: ровно 3 карты
         elif num_cards == 3:
-            print("get_actions - num_cards == 3 - START") # Debug print
             for discarded_index in range(3):
                 indices_to_place = jnp.array([j for j in range(3) if j != discarded_index])
                 cards_to_place_jax = selected_cards_jax[indices_to_place]
                 discarded_card_jax = selected_cards_jax[discarded_index]
 
-                print("get_actions - num_cards == 3 - calling generate_placements") # Debug print
                 placements = generate_placements(cards_to_place_jax, game_state.board, game_state.ai_settings)
                 for placement in placements:
                     action = placement.at[13].set(discarded_card_jax)
                     actions.append(action)
-            print("get_actions - num_cards == 3 - END, actions count:", len(actions)) # Debug print
 
         # Общий случай
         else:
-            print("get_actions - General Case (num_cards != 3) - START") # Debug print
-            print("get_actions - General Case - calling generate_placements") # Debug print
             placements = generate_placements(selected_cards_jax, game_state.board, game_state.ai_settings)
             for placement in placements:
                 #  Заполняем discarded
@@ -727,13 +607,10 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
                         for j, card_array in enumerate(discarded_combination):
                             action = action.at[13 + j].set(card_array)
                         actions.append(action)
-            print("get_actions - General Case (num_cards != 3) - END, actions count:", len(actions)) # Debug print
 
 
     logger.debug(f"Generated {len(actions)} actions")
     logger.debug("get_actions - END")
-    print(f"Generated {len(actions)} actions") # Debug print
-    print("get_actions - END") # Debug print
     return jnp.array(actions)
 
 class CFRNode:
@@ -757,7 +634,7 @@ class CFRNode:
         return strategy
 
 class CFRAgent:
-    def __init__(self, iterations: int = 500000, stop_threshold: float = 0.001, batch_size: int = 1, max_nodes: int = 100000):
+    def __init__(self, iterations: int = 500000, stop_threshold: float = 0.001, batch_size: int = 1, max_nodes: int = 100000, ai_settings: Optional[Dict] = None):
         """
         Инициализация оптимизированного MCCFR агента (с JAX).
         """
@@ -782,7 +659,6 @@ class CFRAgent:
         Выбирает ход, используя get_placement.  Для CFRAgent также обновляет стратегию.
         """
         logger.debug("Inside get_move")
-        print("CFRAgent.get_move - START") # Debug print
 
         # ВЫЗЫВАЕМ get_placement (теперь это отдельная функция)
         move = get_placement(
@@ -796,36 +672,41 @@ class CFRAgent:
         if move is None:  # Если get_placement вернул None (нет ходов)
             result["move"] = {"error": "Нет доступных ходов"}
             logger.debug("No actions available (get_placement returned None), returning error.")
-            print("CFRAgent.get_move - No actions available (get_placement returned None), returning error.") # Debug print
             return
 
         result["move"] = move
         logger.debug(f"Final selected move (from get_placement): {move}")
-        print(f"CFRAgent.get_move - Final selected move (from get_placement): {move}") # Debug print
 
         #  УДАЛЯЕМ обновление стратегии из get_move
         # if game_state.ai_settings.get("training_mode", False):
         #     ...
-        print("CFRAgent.get_move - END") # Debug print
 
     def train(self, timeout_event: Event, result: Dict) -> None:
         """
         Функция обучения MCCFR (с пакетным обновлением стратегии и jax.vmap).
         """
-        print("CFRAgent.train - START") # Debug print
-        ai_settings = self.ai_settings # Save ai_settings to local variable
 
-        def play_one_batch(key, ai_settings): # Add ai_settings as parameter
+        def play_one_batch(key):
             """
             Разыгрывает одну партию и возвращает траекторию.
             """
-            print("CFRAgent.play_one_batch - START") # Debug print
+            print("CFRAgent.play_one_batch - START")  # Debug print
             all_cards = Card.get_all_cards()
+            print(f"CFRAgent.play_one_batch - Initial all_cards type: {type(all_cards)}, first card: {all_cards[0]}") # Debug print
             key, subkey = random.split(key)
-            # all_cards = random.permutation(subkey, jnp.array(all_cards)) # Commented out!
-            all_cards = [Card(card.rank, card.suit) for card in all_cards]  # Modified line
-            game_state_p0 = GameState(deck=all_cards, ai_settings=ai_settings)
-            game_state_p1 = GameState(deck=all_cards, ai_settings=ai_settings)
+
+            jax_all_cards = jnp.array(all_cards) #  Сохраняем jnp.array в отдельной переменной
+            print(f"CFRAgent.play_one_batch - jax_all_cards type: {type(jax_all_cards)}, dtype: {jax_all_cards.dtype}, shape: {jax_all_cards.shape}, first element: {jax_all_cards[0]}") # Debug print
+            all_cards_permuted_jax = random.permutation(subkey, jax_all_cards) #  Используем jax_all_cards для permutation
+            print(f"CFRAgent.play_one_batch - all_cards_permuted_jax type: {type(all_cards_permuted_jax)}, dtype: {all_cards_permuted_jax.dtype}, shape: {all_cards_permuted_jax.shape}, first element: {all_cards_permuted_jax[0]}") # Debug print
+
+            # all_cards = random.permutation(subkey, jnp.array(all_cards)) # Original line - replaced
+            all_cards = [Card(card.rank, card.suit) for card in all_cards_permuted_jax.tolist()] # Modified line - using all_cards_permuted_jax
+            print(f"CFRAgent.play_one_batch - all_cards after permutation and tolist type: {type(all_cards)}, first card: {all_cards[0]}") # Debug print
+
+
+            game_state_p0 = GameState(deck=all_cards, ai_settings=self.ai_settings)
+            game_state_p1 = GameState(deck=all_cards, ai_settings=self.ai_settings)
 
             #  Флаги "Фантазии" для каждого игрока
             fantasy_p0 = False
@@ -872,7 +753,6 @@ class CFRAgent:
             cards_dealt = 10  #  Счетчик розданных карт
 
             while not game_state_p0.board.is_full() or not game_state_p1.board.is_full():
-                print("CFRAgent.play_one_batch - game loop iteration - START") # Debug print
 
                 #  Определяем, видит ли текущий игрок карты соперника
                 if current_player == 0:
@@ -918,9 +798,7 @@ class CFRAgent:
                             visible_cards_p1 = opponent_game_state.board.top + opponent_game_state.board.middle + opponent_game_state.board.bottom + new_cards
 
                 #  Получаем доступные действия
-                print("CFRAgent.play_one_batch - calling get_actions") # Debug print
                 actions = get_actions(current_game_state)
-                print("CFRAgent.play_one_batch - actions shape:", actions.shape) # Debug print
                 if not actions.shape[0] == 0:
 
                     self.key, subkey = random.split(self.key)
@@ -939,7 +817,6 @@ class CFRAgent:
                     else:
                         pi_1 *= 1.0 / actions.shape[0]
 
-                    print("CFRAgent.play_one_batch - calling apply_action") # Debug print
                     current_game_state = current_game_state.apply_action(action_from_array(actions[action_index]))
                     #  Удаляем карты из selected_cards
                     current_game_state.selected_cards = Hand([])
@@ -958,7 +835,6 @@ class CFRAgent:
                     visible_cards_p1 = opponent_game_state.board.top + opponent_game_state.board.middle + opponent_game_state.board.bottom
                     if fantasy_p0:
                         visible_cards_p1 = []
-                print("CFRAgent.play_one_batch - game loop iteration - END") # Debug print
 
 
             #  После того, как оба игрока заполнили доски:
@@ -975,57 +851,46 @@ class CFRAgent:
                 fantasy_p1 = False
 
             #  3.  Рассчитываем payoff (с учетом того, кто ходил первым)
-            print("CFRAgent.play_one_batch - calling get_payoff") # Debug print
             if first_player == 0:
                 payoff = float(game_state_p0.get_payoff(opponent_board=game_state_p1.board))
             else:
                 payoff = float(game_state_p1.get_payoff(opponent_board=game_state_p0.board))
-            print("CFRAgent.play_one_batch - payoff:", payoff) # Debug print
 
             trajectory['payoff'] = [payoff] * len(trajectory['info_sets'])
-            print("CFRAgent.play_one_batch - END") # Debug print
+
             return trajectory
 
-        play_batch = jax.vmap(play_one_batch, in_axes=(0, None))
+        play_batch = jax.vmap(play_one_batch)
         dealer = -1 #  Начинаем с -1, чтобы в первой партии дилер был случайным
 
         for i in range(self.iterations // self.batch_size):
             if timeout_event.is_set():
                 logger.info(f"Training interrupted after {i * self.batch_size} iterations due to timeout.")
-                print(f"CFRAgent.train - Training interrupted after {i * self.batch_size} iterations due to timeout.") # Debug print
                 break
 
             self.key, *subkeys = random.split(self.key, num=self.batch_size + 1)
             subkeys = jnp.array(subkeys)
 
-            print("CFRAgent.train - calling play_batch (jax.vmap)") # Debug print
-            trajectories = play_batch(subkeys, ai_settings)
-            print("CFRAgent.train - play_batch (jax.vmap) finished") # Debug print
+            trajectories = play_batch(subkeys)
 
-            print("CFRAgent.train - calling update_strategy") # Debug print
             self.update_strategy(trajectories)
-            print("CFRAgent.train - update_strategy finished") # Debug print
 
             if (i + 1) * self.batch_size % self.save_interval == 0:
                 logger.info(f"Iteration {(i + 1) * self.batch_size} of {self.iterations} complete.")
-                print(f"CFRAgent.train - Iteration {(i + 1) * self.batch_size} of {self.iterations} complete.") # Debug print
                 if (i + 1) * self.batch_size % 10000 == 0:
                     self.save_progress()
                     logger.info(f"Progress saved at iteration {(i + 1) * self.batch_size}")
-                    print(f"CFRAgent.train - Progress saved at iteration {(i + 1) * self.batch_size}") # Debug print
 
                 if (i + 1) * self.batch_size % 50000 == 0 and self.check_convergence():
                     logger.info(f"CFR agent converged after {(i + 1) * self.batch_size} iterations.")
-                    print(f"CFRAgent.train - CFR agent converged after {(i + 1) * self.batch_size} iterations.") # Debug print
                     break
             dealer = 1 - dealer #  Меняем дилера для следующего батча
-        print("CFRAgent.train - END") # Debug print
 
     def update_strategy(self, trajectories):
         """
         Пакетное обновление стратегии на основе накопленных траекторий (JAX-версия).
         """
-        print("CFRAgent.update_strategy - START") # Debug print
+
         #  Объединяем траектории из разных партий в один словарь
         combined_trajectory = {
             'info_sets': [item for trajectory in trajectories for item in trajectory['info_sets']],
@@ -1087,7 +952,6 @@ class CFRAgent:
         update_node_vmap = jax.vmap(update_node)
 
         #  Применяем update_node ко всем элементам траектории
-        print("CFRAgent.update_strategy - calling update_node_vmap (jax.vmap)") # Debug print
         new_regret_sums, new_strategy_sums = update_node_vmap(
             combined_trajectory['info_sets'],
             combined_trajectory['action_indices'],
@@ -1097,14 +961,12 @@ class CFRAgent:
             combined_trajectory['player'],
             combined_trajectory['actions']
         )
-        print("CFRAgent.update_strategy - update_node_vmap (jax.vmap) finished") # Debug print
 
         #  Обновляем массивы regret_sums и strategy_sums
         #  Для этого нужно сначала получить индексы узлов для каждой записи в траектории
         node_indices = jnp.array([self.nodes_map[hash(info_set)] for info_set in combined_trajectory['info_sets']])
         self.regret_sums = self.regret_sums.at[node_indices].set(new_regret_sums)
         self.strategy_sums = self.strategy_sums.at[node_indices].set(new_strategy_sums)
-        print("CFRAgent.update_strategy - END") # Debug print
 
     @jit
     def check_convergence(self) -> bool:
@@ -1112,7 +974,6 @@ class CFRAgent:
         Проверяет, сошлось ли обучение (средняя стратегия близка к равномерной).
         (JAX-версия)
         """
-        print("CFRAgent.check_convergence - START") # Debug print
         #  Вместо цикла по self.nodes.values() используем jnp.where и self.nodes_mask
         valid_indices = jnp.where(self.nodes_mask)[0]  #  Получаем индексы действительных узлов
 
@@ -1128,9 +989,7 @@ class CFRAgent:
         not_converged = jax.vmap(check_one_node)(valid_indices)
 
         #  Если хотя бы один узел не сошелся, возвращаем False
-        result = not jnp.any(not_converged)
-        print("CFRAgent.check_convergence - END, result:", result) # Debug print
-        return result
+        return not jnp.any(not_converged)
 
     def get_average_strategy_by_index(self, index: int) -> jnp.ndarray:
         """
@@ -1145,147 +1004,97 @@ class CFRAgent:
     @jit
     def _get_rank_counts(self, cards_jax: jnp.ndarray) -> jnp.ndarray:
         """Подсчитывает количество карт каждого ранга."""
-        print("_get_rank_counts - START") # Debug print
-        print(f"_get_rank_counts - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         ranks = cards_jax[:, 0]
-        result = jnp.bincount(ranks, minlength=13)
-        print("_get_rank_counts - END") # Debug print
-        return result
+        return jnp.bincount(ranks, minlength=13)
 
     @jit
     def _get_suit_counts(self, cards_jax: jnp.ndarray) -> jnp.ndarray:
         """Подсчитывает количество карт каждой масти."""
-        print("_get_suit_counts - START") # Debug print
-        print(f"_get_suit_counts - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         suits = cards_jax[:, 1]
-        result = jnp.bincount(suits, minlength=4)
-        print("_get_suit_counts - END") # Debug print
-        return result
+        return jnp.bincount(suits, minlength=4)
 
     @jit
     def _is_flush(self, cards_jax: jnp.ndarray) -> bool:
         """Проверяет, является ли набор карт флешем."""
-        print("_is_flush - START") # Debug print
-        print(f"_is_flush - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         suits = cards_jax[:, 1]
-        result = jnp.all(suits == suits[0])  #  Все масти одинаковые
-        print("_is_flush - END") # Debug print
-        return result
+        return jnp.all(suits == suits[0])  #  Все масти одинаковые
 
     @jit
     def _is_straight(self, cards_jax: jnp.ndarray) -> bool:
         """Проверяет, является ли набор карт стритом."""
-        print("_is_straight - START") # Debug print
-        print(f"_is_straight - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         ranks = jnp.sort(cards_jax[:, 0])
         #  Особый случай: A-5 стрит
         if jnp.array_equal(ranks, jnp.array([0, 1, 2, 3, 12])):
-            result = True
-        else:
-            result = jnp.all(jnp.diff(ranks) == 1)
-        print("_is_straight - END") # Debug print
-        return result
+            return True
+        return jnp.all(jnp.diff(ranks) == 1)
 
     @jit
     def _is_straight_flush(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_straight_flush - START") # Debug print
-        print(f"_is_straight_flush - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
-        result = self._is_straight(cards_jax) and self._is_flush(cards_jax)
-        print("_is_straight_flush - END") # Debug print
-        return result
+        return self._is_straight(cards_jax) and self._is_flush(cards_jax)
 
     @jit
     def _is_royal_flush(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_royal_flush - START") # Debug print
-        print(f"_is_royal_flush - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         if not self._is_flush(cards_jax):
-            result = False
-        else:
-            ranks = jnp.sort(cards_jax[:, 0])
-            result = jnp.array_equal(ranks, jnp.array([8, 9, 10, 11, 12]))
-        print("_is_royal_flush - END") # Debug print
-        return result
+            return False
+        ranks = jnp.sort(cards_jax[:, 0])
+        return jnp.array_equal(ranks, jnp.array([8, 9, 10, 11, 12]))
 
     @jit
     def _is_four_of_a_kind(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_four_of_a_kind - START") # Debug print
-        print(f"_is_four_of_a_kind - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
-        result = jnp.any(self._get_rank_counts(cards_jax) == 4)
-        print("_is_four_of_a_kind - END") # Debug print
-        return result
+        return jnp.any(self._get_rank_counts(cards_jax) == 4)
 
     @jit
     def _is_full_house(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_full_house - START") # Debug print
-        print(f"_is_full_house - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         counts = self._get_rank_counts(cards_jax)
-        result = jnp.any(counts == 3) and jnp.any(counts == 2)
-        print("_is_full_house - END") # Debug print
-        return result
+        return jnp.any(counts == 3) and jnp.any(counts == 2)
 
     @jit
     def _is_three_of_a_kind(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_three_of_a_kind - START") # Debug print
-        print(f"_is_three_of_a_kind - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
-        result = jnp.any(self._get_rank_counts(cards_jax) == 3)
-        print("_is_three_of_a_kind - END") # Debug print
-        return result
+        return jnp.any(self._get_rank_counts(cards_jax) == 3)
 
     @jit
     def _is_two_pair(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_two_pair - START") # Debug print
-        print(f"_is_two_pair - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
-        result = jnp.sum(self._get_rank_counts(cards_jax) == 2) == 2
-        print("_is_two_pair - END") # Debug print
-        return result
+        return jnp.sum(self._get_rank_counts(cards_jax) == 2) == 2
 
     @jit
     def _is_one_pair(self, cards_jax: jnp.ndarray) -> bool:
-        print("_is_one_pair - START") # Debug print
-        print(f"_is_one_pair - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
-        result = jnp.any(self._get_rank_counts(cards_jax) == 2)
-        print("_is_one_pair - END") # Debug print
-        return result
+        return jnp.any(self._get_rank_counts(cards_jax) == 2)
 
     @jit
     def _identify_combination(self, cards_jax: jnp.ndarray) -> int:
         """Определяет тип комбинации (возвращает индекс)."""
-        print("_identify_combination - START") # Debug print
-        print(f"_identify_combination - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
         if cards_jax.shape[0] == 0:  #  Пустой набор карт
-            result = 10
-        elif cards_jax.shape[0] == 3:
+            return 10
+
+        if cards_jax.shape[0] == 3:
             if self._is_three_of_a_kind(cards_jax):
-                result = 6  # "three_of_a_kind"
-            elif self._is_one_pair(cards_jax):
-                result = 8  # "pair"
-            else:
-                result = 9  # high card
-        elif cards_jax.shape[0] == 5:
+                return 6  # "three_of_a_kind"
+            if self._is_one_pair(cards_jax):
+                return 8  # "pair"
+            return 9  # high card
+
+        if cards_jax.shape[0] == 5:
             if self._is_royal_flush(cards_jax):
-                result = 0  # "royal_flush"
+                return 0  # "royal_flush"
             elif self._is_straight_flush(cards_jax):
-                result = 1  # "straight_flush"
+                return 1  # "straight_flush"
             elif self._is_four_of_a_kind(cards_jax):
-                result = 2  # "four_of_a_kind"
+                return 2  # "four_of_a_kind"
             elif self._is_full_house(cards_jax):
-                result = 3  # "full_house"
+                return 3  # "full_house"
             elif self._is_flush(cards_jax):
-                result = 4  # "flush"
+                return 4  # "flush"
             elif self._is_straight(cards_jax):
-                result = 5  # "straight"
+                return 5  # "straight"
             elif self._is_three_of_a_kind(cards_jax):
-                result = 6  # "three_of_a_kind"
+                return 6  # "three_of_a_kind"
             elif self._is_two_pair(cards_jax):
-                result = 7  # "two_pair"
+                return 7  # "two_pair"
             elif self._is_one_pair(cards_jax):
-                result = 8  # "pair"
+                return 8  # "pair"
             else:
-                result = 9  # "high_card"
-        else:
-            result = 10
-        print("_identify_combination - END, result:", result) # Debug print
-        return result
+                return 9  # "high_card"
+        return 10
 
     @jit
     def is_dead_hand_jax(self, placement: jnp.ndarray, ai_settings: Dict) -> bool:
@@ -1293,8 +1102,6 @@ class CFRAgent:
         Проверяет, является ли размещение мертвой рукой (JAX-версия).
         Принимает JAX-массив placement (14, 2).
         """
-        print("is_dead_hand_jax - START") # Debug print
-        print(f"is_dead_hand_jax - placement type: {type(placement)}, placement value: {placement}") # Debug print
         top_cards = placement[:3]
         middle_cards = placement[3:8]
         bottom_cards = placement[8:13]
@@ -1306,269 +1113,13 @@ class CFRAgent:
 
         #  Если каких-то линий нет (например, в начале игры), считаем, что рука не мертвая
         if len(top_cards) == 0 or len(middle_cards) == 0 or len(bottom_cards) == 0:
-            print("is_dead_hand_jax - END - not dead hand because lines are empty") # Debug print
             return False
 
-        print("is_dead_hand_jax - calling _identify_combination for top_cards") # Debug print
         top_rank = self._identify_combination(top_cards)
-        print("is_dead_hand_jax - top_rank:", top_rank) # Debug print
-        print("is_dead_hand_jax - calling _identify_combination for middle_cards") # Debug print
         middle_rank = self._identify_combination(middle_cards)
-        print("is_dead_hand_jax - middle_rank:", middle_rank) # Debug print
-        print("is_dead_hand_jax - calling _identify_combination for bottom_cards") # Debug print
         bottom_rank = self._identify_combination(bottom_cards)
-        print("is_dead_hand_jax - bottom_rank:", bottom_rank) # Debug print
 
-        result = (top_rank > middle_rank) or (middle_rank > bottom_rank)
-        print("is_dead_hand_jax - END, result:", result) # Debug print
-        return result
-
-    @jit
-    def evaluate_hand(self, cards_jax: jnp.ndarray) -> Tuple[int, float]:
-        """
-        Оптимизированная оценка покерной комбинации (JAX-версия).
-        Возвращает (ранг, score), где меньший ранг = лучшая комбинация.
-        """
-        print("evaluate_hand - START") # Debug print
-        print(f"evaluate_hand - cards_jax type: {type(cards_jax)}, cards_jax value: {cards_jax}") # Debug print
-        if cards_jax.shape[0] == 0:
-            print("evaluate_hand - END - empty hand") # Debug print
-            return 11, 0.0
-
-        n = cards_jax.shape[0]
-
-        print("evaluate_hand - calling _get_rank_counts") # Debug print
-        rank_counts = self._get_rank_counts(cards_jax)
-        print("evaluate_hand - rank_counts:", rank_counts) # Debug print
-        print("evaluate_hand - calling _get_suit_counts") # Debug print
-        suit_counts = self._get_suit_counts(cards_jax)
-        print("evaluate_hand - suit_counts:", suit_counts) # Debug print
-        has_flush = jnp.max(suit_counts) == n
-        rank_indices = jnp.sort(cards_jax[:, 0])
-
-        is_straight = False
-        if jnp.unique(rank_indices).shape[0] == n:
-            if jnp.max(rank_indices) - jnp.min(rank_indices) == n - 1:
-                is_straight = True
-            elif jnp.array_equal(rank_indices, jnp.array([0, 1, 2, 3, 12])):
-                is_straight = True
-
-        if n == 3:
-            if jnp.max(rank_counts) == 3:
-                rank = cards_jax[0, 0]
-                result_rank_eval = 7
-                result_score_eval = 10.0 + rank
-            elif jnp.max(rank_counts) == 2:
-                pair_rank_index = jnp.where(rank_counts == 2)[0][0]
-                result_rank_eval = 8
-                result_score_eval = pair_rank_index / 100.0
-            else:
-                high_card_rank_index = jnp.max(rank_indices)
-                result_rank_eval = 9
-                result_score_eval = high_card_rank_index / 100.0
-
-        elif n == 5:
-            if has_flush and is_straight:
-                if jnp.array_equal(rank_indices, jnp.array([8, 9, 10, 11, 12])):
-                    result_rank_eval = 1  # Роял-флеш
-                    result_score_eval = 25.0
-                else:
-                    result_rank_eval = 2
-                    result_score_eval = 15.0 + jnp.max(rank_indices) / 100.0
-
-            elif jnp.max(rank_counts) == 4:
-                four_rank_index = jnp.where(rank_counts == 4)[0][0]
-                result_rank_eval = 3
-                result_score_eval = 10.0 + four_rank_index / 100.0
-
-            elif jnp.array_equal(jnp.sort(rank_counts), jnp.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0])):
-                three_rank_index = jnp.where(rank_counts == 3)[0][0]
-                result_rank_eval = 4
-                result_score_eval = 6.0 + three_rank_index / 100.0
-
-            elif has_flush:
-                result_rank_eval = 5
-                result_score_eval = 4.0 + jnp.max(rank_indices) / 100.0
-
-            elif is_straight:
-                result_rank_eval = 6
-                result_score_eval = 2.0 + jnp.max(rank_indices) / 100.0
-
-            elif jnp.max(rank_counts) == 3:
-                three_rank_index = jnp.where(rank_counts == 3)[0][0]
-                result_rank_eval = 7
-                result_score_eval = 2.0 + three_rank_index / 100.0
-
-            pairs = jnp.where(rank_counts == 2)[0]
-            if len(pairs) == 2:
-                high_pair_index = jnp.max(pairs)
-                low_pair_index = jnp.min(pairs)
-                result_rank_eval = 8
-                result_score_eval = 1.0 + high_pair_index / 100.0 + low_pair_index / 10000.0
-
-            elif len(pairs) == 1:
-                pair_rank_index = pairs[0]
-                result_rank_eval = 9
-                result_score_eval = pair_rank_index / 100.0
-
-            else:
-                result_rank_eval = 10
-                result_score_eval = jnp.max(rank_indices) / 100.0
-        else: # default case, should not be reached in normal game
-            result_rank_eval = 11
-            result_score_eval = 0.0
-
-        print("evaluate_hand - END, rank:", result_rank_eval, "score:", result_score_eval) # Debug print
-        return result_rank_eval, result_score_eval
-
-    @jit
-    def calculate_royalties(self, board: Board) -> jnp.ndarray:
-        """
-        Корректный расчет роялти по американским правилам (JAX-версия).
-        """
-        print("calculate_royalties - START") # Debug print
-
-        @jit
-        def get_royalty(line: jnp.int32, rank: jnp.int32, rank_index: Optional[jnp.int32] = None) -> jnp.int32:
-            # line: 0 - top, 1 - middle, 2 - bottom
-            # rank: индекс комбинации (0-10)
-            # rank_index: индекс ранга (для сетов, пар)
-            print("calculate_royalties.get_royalty - START") # Debug print
-            print(f"calculate_royalties.get_royalty - line type: {type(line)}, line value: {line}, rank type: {type(rank)}, rank value: {rank}, rank_index type: {type(rank_index)}, rank_index value: {rank_index}") # Debug print
-
-            top_royalties = jnp.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-            top_royalties = top_royalties.at[7].set(jnp.where(rank_index is not None, 10 + rank_index, 0))
-            top_royalties = top_royalties.at[8].set(jnp.where((rank_index is not None) & (rank_index >= 4), rank_index - 3, 0))
-
-            middle_royalties = jnp.array([0, 50, 30, 20, 12, 8, 4, 2, 0, 0, 0])
-            bottom_royalties = jnp.array([0, 25, 15, 10, 6, 4, 2, 0, 0, 0, 0])
-
-            result_royalty = jnp.where(line == 0, top_royalties[rank],
-                            jnp.where(line == 1, middle_royalties[rank], bottom_royalties[rank]))
-            print("calculate_royalties.get_royalty - END, result_royalty:", result_royalty) # Debug print
-            return result_royalty
-
-
-        #  Создаем JAX-массивы для top, middle, bottom
-        print("calculate_royalties - board.top type:", type(board.top), "value:", board.top) # Debug print
-        top_cards_jax = jnp.array([card_to_array(card) for card in board.top])
-        print("calculate_royalties - top_cards_jax type:", type(top_cards_jax), "value:", top_cards_jax) # Debug print
-        print("calculate_royalties - board.middle type:", type(board.middle), "value:", board.middle) # Debug print
-        middle_cards_jax = jnp.array([card_to_array(card) for card in board.middle])
-        print("calculate_royalties - middle_cards_jax type:", type(middle_cards_jax), "value:", middle_cards_jax) # Debug print
-        print("calculate_royalties - board.bottom type:", type(board.bottom), "value:", board.bottom) # Debug print
-        bottom_cards_jax = jnp.array([card_to_array(card) for card in board.bottom])
-        print("calculate_royalties - bottom_cards_jax type:", type(bottom_cards_jax), "value:", bottom_cards_jax) # Debug print
-
-
-        #  Проверяем, не является ли рука мертвой
-        if len(top_cards_jax) < 3 or len(middle_cards_jax) < 5 or len(bottom_cards_jax) < 5 or self.is_dead_hand(board):
-            print("calculate_royalties - dead hand or incomplete lines, returning [0, 0, 0]") # Debug print
-            return jnp.array([0, 0, 0])
-
-        print("calculate_royalties - calling evaluate_hand for top_cards_jax") # Debug print
-        top_rank, _ = self.evaluate_hand(top_cards_jax)
-        print("calculate_royalties - top_rank:", top_rank) # Debug print
-        print("calculate_royalties - calling evaluate_hand for middle_cards_jax") # Debug print
-        middle_rank, _ = self.evaluate_hand(middle_cards_jax)
-        print("calculate_royalties - middle_rank:", middle_rank) # Debug print
-        print("calculate_royalties - calling evaluate_hand for bottom_cards_jax") # Debug print
-        bottom_rank, _ = self.evaluate_hand(bottom_cards_jax)
-        print("calculate_royalties - bottom_rank:", bottom_rank) # Debug print
-
-
-        top_rank_index = None
-        if top_rank == 7:  # Сет
-            top_rank_index = top_cards_jax[0, 0]  #  Индекс ранга сета
-        elif top_rank == 8: # Пара
-            top_rank_index = jnp.where(jnp.bincount(top_cards_jax[:, 0], minlength=13) == 2)[0][0]
-
-        print("calculate_royalties - calling get_royalty for top line") # Debug print
-        royalty_top = get_royalty(0, top_rank, top_rank_index)
-        print("calculate_royalties - royalty_top:", royalty_top) # Debug print
-        print("calculate_royalties - calling get_royalty for middle line") # Debug print
-        royalty_middle = get_royalty(1, middle_rank)
-        print("calculate_royalties - royalty_middle:", royalty_middle) # Debug print
-        print("calculate_royalties - calling get_royalty for bottom line") # Debug print
-        royalty_bottom = get_royalty(2, bottom_rank)
-        print("calculate_royalties - royalty_bottom:", royalty_bottom) # Debug print
-
-
-        royalties = jnp.array([
-            royalty_top,
-            royalty_middle,
-            royalty_bottom
-        ])
-        print("calculate_royalties - END, royalties:", royalties) # Debug print
-
-        return royalties
-
-    @jit
-    def get_line_royalties(self, cards_jax: jnp.ndarray, line: str) -> int:
-        """Calculates royalties for a specific line."""
-        if cards_jax.shape[0] == 0:
-            return 0
-
-        rank, _ = self.evaluate_hand(cards_jax)
-        if line == "top":
-            if rank == 7:
-                return 10 + cards_jax[0, 0]
-            elif rank == 8:
-                return self.get_pair_bonus(cards_jax)
-            elif rank == 9:
-                return self.get_high_card_bonus(cards_jax)
-        elif line == "middle":
-            if rank <= 6:
-                return self.get_royalties_for_hand(rank) * 2
-        elif line == "bottom":
-            if rank <= 6:
-                return self.get_royalties_for_hand(rank)
-        return 0
-
-    @jit
-    def get_royalties_for_hand(self, hand_rank: int) -> int:
-        return jnp.where(hand_rank == 1, 25,
-               jnp.where(hand_rank == 2, 15,
-               jnp.where(hand_rank == 3, 10,
-               jnp.where(hand_rank == 4, 6,
-               jnp.where(hand_rank == 5, 4,
-               jnp.where(hand_rank == 6, 2, 0))))))
-
-    @jit
-    def get_pair_bonus(self, cards_jax: jnp.ndarray) -> int:
-        """Calculates the bonus for a pair in the top line."""
-        if cards_jax.shape[0] != 3:
-            return 0
-        ranks = cards_jax[:, 0]
-        pair_rank_index = jnp.where(jnp.bincount(ranks, minlength=13) == 2)[0]
-        return jnp.where(pair_rank_index.size > 0, jnp.maximum(0, pair_rank_index[0] - 4), 0)
-
-    @jit
-    def get_high_card_bonus(self, cards_jax: jnp.ndarray) -> int:
-        """Calculates the bonus for a high card in the top line."""
-        if cards_jax.shape[0] != 3:
-            return 0
-        ranks = cards_jax[:, 0]
-        if jnp.unique(ranks).shape[0] == 3:
-            high_card_index = jnp.max(ranks)
-            return jnp.where(high_card_index == 12, 1, 0)
-        return 0
-
-    @jit
-    def get_progressive_fantasy_cards(self, board: Board) -> int:
-      top_cards_jax = jnp.array([card_to_array(card) for card in board.top])
-      top_rank, _ = self.evaluate_hand(top_cards_jax)
-      if top_rank == 8:  # Пара
-          rank = top_cards_jax[0, 0]  # Ранг первой карты
-          return jnp.where(rank == 12, 16,  # A
-                  jnp.where(rank == 11, 15,  # K
-                  jnp.where(rank == 10, 14,  # Q
-                  14)))  # По умолчанию 14
-      elif top_rank == 7:  # Сет
-          return 17
-      return 14
-
-    # ... (Вспомогательные функции _get_rank_counts, _get_suit_counts, _is_flush, _is_straight, _is_straight_flush, _is_royal_flush, _is_four_of_a_kind, _is_full_house, _is_three_of_a_kind, _is_two_pair, _is_one_pair, _identify_combination, is_dead_hand_jax - уже с принтами выше) ...
+        return (top_rank > middle_rank) or (middle_rank > bottom_rank)
 
     # ... (Методы, связанные с узлами CFRNode: get_strategy, get_average_strategy) ...
 
@@ -1651,7 +1202,6 @@ class RandomAgent:
         Выбирает ход, используя get_placement (случайный выбор из возможных).
         """
         logger.debug("Inside RandomAgent get_move")
-        print("RandomAgent.get_move - START") # Debug print
 
         # ВЫЗЫВАЕМ get_placement (теперь это отдельная функция)
         move = get_placement(
@@ -1664,13 +1214,10 @@ class RandomAgent:
         if move is None:  # Если get_placement вернул None (нет ходов)
             result["move"] = {"error": "Нет доступных ходов"}
             logger.debug("No actions available (get_placement returned None), returning error.")
-            print("RandomAgent.get_move - No actions available (get_placement returned None), returning error.") # Debug print
             return
 
         result["move"] = move
         logger.debug(f"Final selected move (from get_placement): {move}")
-        print(f"RandomAgent.get_move - Final selected move (from get_placement): {move}") # Debug print
-        print("RandomAgent.get_move - END") # Debug print
 
     def evaluate_move(self, game_state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float:
         pass
