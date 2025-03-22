@@ -812,19 +812,19 @@ class CFRAgent:
         Функция обучения MCCFR (с пакетным обновлением стратегии и jax.vmap).
         """
         print("CFRAgent.train - START") # Debug print
+        ai_settings = self.ai_settings # Save ai_settings to local variable
 
-        def play_one_batch(key):
+        def play_one_batch(key, ai_settings): # Add ai_settings as parameter
             """
             Разыгрывает одну партию и возвращает траекторию.
             """
             print("CFRAgent.play_one_batch - START") # Debug print
             all_cards = Card.get_all_cards()
             key, subkey = random.split(key)
-            # all_cards = random.permutation(subkey, jnp.array(all_cards))
-            # all_cards = [Card(card.rank, card.suit) for card in all_cards.tolist()] # Предыдущая строка
-            all_cards = [Card(card.rank, card.suit) for card in all_cards] # Новая строка
-            game_state_p0 = GameState(deck=all_cards, ai_settings=self.ai_settings)
-            game_state_p1 = GameState(deck=all_cards, ai_settings=self.ai_settings)
+            # all_cards = random.permutation(subkey, jnp.array(all_cards)) # Commented out!
+            all_cards = [Card(card.rank, card.suit) for card in all_cards]  # Modified line
+            game_state_p0 = GameState(deck=all_cards, ai_settings=ai_settings)
+            game_state_p1 = GameState(deck=all_cards, ai_settings=ai_settings)
 
             #  Флаги "Фантазии" для каждого игрока
             fantasy_p0 = False
@@ -985,7 +985,7 @@ class CFRAgent:
             print("CFRAgent.play_one_batch - END") # Debug print
             return trajectory
 
-        play_batch = jax.vmap(play_one_batch)
+        play_batch = jax.vmap(play_one_batch, in_axes=(0, None))
         dealer = -1 #  Начинаем с -1, чтобы в первой партии дилер был случайным
 
         for i in range(self.iterations // self.batch_size):
@@ -998,7 +998,7 @@ class CFRAgent:
             subkeys = jnp.array(subkeys)
 
             print("CFRAgent.train - calling play_batch (jax.vmap)") # Debug print
-            trajectories = play_batch(subkeys)
+            trajectories = play_batch(subkeys, ai_settings)
             print("CFRAgent.train - play_batch (jax.vmap) finished") # Debug print
 
             print("CFRAgent.train - calling update_strategy") # Debug print
