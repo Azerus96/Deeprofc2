@@ -821,7 +821,8 @@ class CFRAgent:
             all_cards = Card.get_all_cards()
             key, subkey = random.split(key)
             # all_cards = random.permutation(subkey, jnp.array(all_cards))
-            all_cards = [Card(card.rank, card.suit) for card in all_cards.tolist()]
+            # all_cards = [Card(card.rank, card.suit) for card in all_cards.tolist()] # Предыдущая строка
+            all_cards = [Card(card.rank, card.suit) for card in all_cards] # Новая строка
             game_state_p0 = GameState(deck=all_cards, ai_settings=self.ai_settings)
             game_state_p1 = GameState(deck=all_cards, ai_settings=self.ai_settings)
 
