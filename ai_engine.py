@@ -695,13 +695,15 @@ class CFRAgent:
             print(f"CFRAgent.play_one_batch - Initial all_cards type: {type(all_cards)}, first card: {all_cards[0]}") # Debug print
             key, subkey = random.split(key)
 
-            jax_all_cards = jnp.array(all_cards) #  Сохраняем jnp.array в отдельной переменной
+            #  Преобразуем список объектов Card в список JAX массивов *перед* jnp.array
+            all_cards_jax_list = [card_to_array(card) for card in all_cards] # <---- Преобразование в список JAX массивов
+            jax_all_cards = jnp.array(all_cards_jax_list) #  Создаем JAX массив *из списка JAX массивов*
             print(f"CFRAgent.play_one_batch - jax_all_cards type: {type(jax_all_cards)}, dtype: {jax_all_cards.dtype}, shape: {jax_all_cards.shape}, first element: {jax_all_cards[0]}") # Debug print
             all_cards_permuted_jax = random.permutation(subkey, jax_all_cards) #  Используем jax_all_cards для permutation
             print(f"CFRAgent.play_one_batch - all_cards_permuted_jax type: {type(all_cards_permuted_jax)}, dtype: {all_cards_permuted_jax.dtype}, shape: {all_cards_permuted_jax.shape}, first element: {all_cards_permuted_jax[0]}") # Debug print
 
             # all_cards = random.permutation(subkey, jnp.array(all_cards)) # Original line - replaced
-            all_cards = [Card(card.rank, card.suit) for card in all_cards_permuted_jax.tolist()] # Modified line - using all_cards_permuted_jax
+            all_cards = [array_to_card(card_array) for card_array in all_cards_permuted_jax.tolist()] # Modified line - using all_cards_permuted_jax and array_to_card
             print(f"CFRAgent.play_one_batch - all_cards after permutation and tolist type: {type(all_cards)}, first card: {all_cards[0]}") # Debug print
 
 
