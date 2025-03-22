@@ -773,6 +773,7 @@ class CFRAgent:
         self.num_actions_arr = jnp.zeros(max_nodes, dtype=jnp.int32)
         self.node_counter = 0
         self.nodes_map = {} # {hash(info_set): node_index}
+        self.ai_settings = ai_settings if ai_settings is not None else {} # <---- ВОТ ЭТА СТРОКА БЫЛА УДАЛЕНА ОШИБОЧНО! ВЕРНИТЕ ЕЕ!
 
 
     @jit
