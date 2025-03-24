@@ -940,8 +940,8 @@ class CFRAgent:
             first_player = current_player
 
             #  Раздаем начальные 5 карт (с учетом видимости)
-            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5] if not jnp.all(c == jnp.array([-1, -1]))])
-            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10] if not jnp.all(c == jnp.array([-1, -1]))])
+            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5]]) # Убрана проверка
+            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10]]) # Убрана проверка
             visible_cards_p0 = all_cards_permuted_jax[5:10]
             visible_cards_p1 = all_cards_permuted_jax[:5]
 
@@ -992,7 +992,7 @@ class CFRAgent:
                     if num_cards_to_deal > 0:
                         new_cards_jax = all_cards_permuted_jax[cards_dealt:cards_dealt + num_cards_to_deal]
                         new_cards_jax = new_cards_jax[jnp.any(new_cards_jax != -1, axis=1)] # ФИЛЬТРУЕМ
-                        current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax if not jnp.all(c == jnp.array([-1,-1]))])  # Добавляем проверку
+                        current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax])  # Убрана проверка
                         cards_dealt += num_cards_to_deal
                         #  Обновляем видимые карты для соперника (если не в "Фантазии")
                         if current_player == 0 and not fantasy_p1:
