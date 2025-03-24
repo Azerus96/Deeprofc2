@@ -555,7 +555,7 @@ def card_to_array(card: Optional[Card]) -> jnp.ndarray:
 
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
-    if jnp.all(card_array == jnp.array([-1, -1])):  # Используем jnp.all
+    if jnp.all(card_array == jnp.array([-1, -1])):
         return None
     return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
 
@@ -940,8 +940,8 @@ class CFRAgent:
             first_player = current_player
 
             #  Раздаем начальные 5 карт (с учетом видимости)
-            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5] if not jnp.all(c == jnp.array([-1, -1]))])  # Добавляем проверку
-            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10] if not jnp.all(c == jnp.array([-1, -1]))]) # Добавляем проверку
+            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5] if not jnp.all(c == jnp.array([-1, -1]))])
+            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10] if not jnp.all(c == jnp.array([-1, -1]))])
             visible_cards_p0 = all_cards_permuted_jax[5:10]
             visible_cards_p1 = all_cards_permuted_jax[:5]
 
@@ -991,24 +991,24 @@ class CFRAgent:
 
                     if num_cards_to_deal > 0:
                         new_cards_jax = all_cards_permuted_jax[cards_dealt:cards_dealt + num_cards_to_deal]
+                        new_cards_jax = new_cards_jax[jnp.any(new_cards_jax != -1, axis=1)] # ФИЛЬТРУЕМ
                         current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax if not jnp.all(c == jnp.array([-1,-1]))])  # Добавляем проверку
                         cards_dealt += num_cards_to_deal
                         #  Обновляем видимые карты для соперника (если не в "Фантазии")
                         if current_player == 0 and not fantasy_p1:
                             visible_cards_p0 = jnp.concatenate([
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom]),
+                                jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                                jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                                jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
                                 new_cards_jax
                             ])
                         elif current_player == 1 and not fantasy_p0:
                             visible_cards_p1 = jnp.concatenate([
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom]),
+                                jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                                jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                                jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
                                 new_cards_jax
                             ])
-
                 #  Получаем доступные действия
                 actions = generate_actions_jax(current_game_state)
                 if not actions.shape[0] == 0:
@@ -1041,17 +1041,17 @@ class CFRAgent:
                 #  После смены игрока обновляем видимые карты
                 if current_player == 0:
                     visible_cards_p0 = jnp.concatenate([
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
+                        jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                        jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                        jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]) # Добавляем проверку
                     ])
                     if fantasy_p1:
                         visible_cards_p0 = jnp.array([])  #  Пустой массив
                 else:
                     visible_cards_p1 = jnp.concatenate([
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
+                        jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                        jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
+                        jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]) # Добавляем проверку
                     ])
                     if fantasy_p0:
                         visible_cards_p1 = jnp.array([])  #  Пустой массив
