@@ -211,18 +211,18 @@ class GameState:
 
         #  Добавляем карты на доску, пропуская пустые слоты (-1, -1)
         for card_array in top_cards:
-            if not jnp.array_equal(card_array, jnp.array([-1, -1])):
+            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
                 new_board.place_card("top", array_to_card(card_array))
         for card_array in middle_cards:
-            if not jnp.array_equal(card_array, jnp.array([-1, -1])):
+            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
                 new_board.place_card("middle", array_to_card(card_array))
         for card_array in bottom_cards:
-            if not jnp.array_equal(card_array, jnp.array([-1, -1])):
+            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
                 new_board.place_card("bottom", array_to_card(card_array))
 
         #  Добавляем сброшенные карты
         for card_array in discarded_cards:
-            if not jnp.array_equal(card_array, jnp.array([-1, -1])):
+            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
                 new_discarded_cards.append(array_to_card(card_array))
 
         new_game_state = GameState(
@@ -556,7 +556,7 @@ def card_to_array(card: Optional[Card]) -> jnp.ndarray:
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
     if jnp.all(card_array == jnp.array([-1, -1])):  # Используем jnp.all
-        return None  #  Пустой слот
+        return None
     return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
 
 
@@ -749,13 +749,13 @@ def generate_actions_jax(game_state: GameState) -> jnp.ndarray:
                     for action in possible_actions:
                         temp_board = Board()
                         for i in range(3):
-                            if not jnp.array_equal(action[i], jnp.array([-1, -1])):
+                            if not jnp.all(action[i] == jnp.array([-1, -1])): # Добавляем проверку
                                 temp_board.place_card("top", array_to_card(action[i]))
                         for i in range(3, 8):
-                            if not jnp.array_equal(action[i], jnp.array([-1, -1])):
+                            if not jnp.all(action[i] == jnp.array([-1, -1])): # Добавляем проверку
                                 temp_board.place_card("middle", array_to_card(action[i]))
                         for i in range(8, 13):
-                            if not jnp.array_equal(action[i], jnp.array([-1, -1])):
+                            if not jnp.all(action[i] == jnp.array([-1, -1])): # Добавляем проверку
                                 temp_board.place_card("bottom", array_to_card(action[i]))
                         temp_boards.append(temp_board)
 
@@ -940,8 +940,8 @@ class CFRAgent:
             first_player = current_player
 
             #  Раздаем начальные 5 карт (с учетом видимости)
-            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5]])
-            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10]])
+            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5] if not jnp.all(c == jnp.array([-1, -1]))])  # Добавляем проверку
+            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10] if not jnp.all(c == jnp.array([-1, -1]))]) # Добавляем проверку
             visible_cards_p0 = all_cards_permuted_jax[5:10]
             visible_cards_p1 = all_cards_permuted_jax[:5]
 
@@ -978,6 +978,7 @@ class CFRAgent:
                                 # num_cards_to_deal = self.get_progressive_fantasy_cards(game_state_p0.board)
                                 num_cards_to_deal = current_game_state.get_progressive_fantasy_cards(jnp.array([card_to_array(card) for card in game_state_p0.board.top]))
                             else:
+                                # num_cards_to_deal = self.get_progressive_fantasy_cards(game_state_p1.board)
                                 num_cards_to_deal = current_game_state.get_progressive_fantasy_cards(jnp.array([card_to_array(card) for card in game_state_p1.board.top]))
 
                         else:
@@ -990,7 +991,7 @@ class CFRAgent:
 
                     if num_cards_to_deal > 0:
                         new_cards_jax = all_cards_permuted_jax[cards_dealt:cards_dealt + num_cards_to_deal]
-                        current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax])  #  Преобразуем обратно в Card
+                        current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax if not jnp.all(c == jnp.array([-1,-1]))])  # Добавляем проверку
                         cards_dealt += num_cards_to_deal
                         #  Обновляем видимые карты для соперника (если не в "Фантазии")
                         if current_player == 0 and not fantasy_p1:
