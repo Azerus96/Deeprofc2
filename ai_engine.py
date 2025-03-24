@@ -16,8 +16,8 @@ from jax import jit
 logger = logging.getLogger(__name__)
 
 class Card:
-    RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-    SUITS = ["♥", "♦", "♣", "♠"]
+    RANKS = jnp.array(["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"])
+    SUITS = jnp.array(["♥", "♦", "♣", "♠"])
 
     def __init__(self, rank: str, suit: str):
         if rank not in self.RANKS:
@@ -566,7 +566,7 @@ def card_to_array(card: Optional[Card]) -> jnp.ndarray:
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
     try:
-        return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
+        return Card(jnp.take(Card.RANKS, card_array[0]), jnp.take(Card.SUITS, card_array[1]))
     except IndexError:
         return None
 
@@ -773,7 +773,6 @@ def generate_actions_jax(game_state: GameState) -> jnp.ndarray:
                                 temp_board.place_card("bottom", array_to_card(action[i]))
                             except (IndexError, TypeError):
                                 pass
-
                         temp_boards.append(temp_board)
 
                     #  Векторизуем расчет роялти
@@ -1189,7 +1188,7 @@ class CFRAgent:
 
             strategy = jnp.maximum(regret_sum, 0)
             normalizing_sum = jnp.sum(strategy)
-            strategy = jnp.where(normalizing_sum > 0, strategy / normalizing_sum, jnp.ones(num_actions) / num_actions)
+            strategy = jnp.where(normalizing_sum > 0, strategy / normalizing_sum, jnp.ones(num_actions) / self.num_actions)
             strategy_sum = strategy_sum.at[:num_actions].set(strategy_sum[:num_actions] + (pi_0 if player == 0 else pi_1) * strategy)
 
             util = jnp.zeros(num_actions)
