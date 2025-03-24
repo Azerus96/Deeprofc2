@@ -211,18 +211,18 @@ class GameState:
 
         #  Добавляем карты на доску, пропуская пустые слоты (-1, -1)
         for card_array in top_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
+            if not jnp.all(card_array == jnp.array([-1, -1])):
                 new_board.place_card("top", array_to_card(card_array))
         for card_array in middle_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
+            if not jnp.all(card_array == jnp.array([-1, -1])):
                 new_board.place_card("middle", array_to_card(card_array))
         for card_array in bottom_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
+            if not jnp.all(card_array == jnp.array([-1, -1])):
                 new_board.place_card("bottom", array_to_card(card_array))
 
         #  Добавляем сброшенные карты
         for card_array in discarded_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])): # Добавляем проверку
+            if not jnp.all(card_array == jnp.array([-1, -1])):
                 new_discarded_cards.append(array_to_card(card_array))
 
         new_game_state = GameState(
@@ -922,26 +922,22 @@ class CFRAgent:
             }
 
             #  Определяем, кто дилер (в первой партии - случайно)
-            # key, subkey = random.split(key)  #  Уже делили key
-            # dealer = int(random.choice(subkey, jnp.array([0, 1])))  #  0 - игрок 0, 1 - игрок 1
-            #  В первой партии дилер выбирается случайно, в последующих - меняется
-            nonlocal dealer #  Используем nonlocal, т.к. dealer объявлена во внешней функции
-            if 'dealer' not in locals():  #  Если дилер еще не определен (первая партия)
+            nonlocal dealer
+            if 'dealer' not in locals():
                 key, subkey = random.split(key)
                 dealer = int(random.choice(subkey, jnp.array([0, 1])))
             else:
-                dealer = 1 - dealer  #  Меняем дилера
+                dealer = 1 - dealer
 
             #  Определяем, кто ходит первым (тот, кто слева от дилера)
             current_player = 1 - dealer
             current_game_state = game_state_p0 if current_player == 0 else game_state_p1
             opponent_game_state = game_state_p1 if current_player == 0 else game_state_p0
-            #  Для корректного расчета payoff в конце игры
             first_player = current_player
 
             #  Раздаем начальные 5 карт (с учетом видимости)
-            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5]]) # Убрана проверка
-            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10]]) # Убрана проверка
+            game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5]])
+            game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10]])
             visible_cards_p0 = all_cards_permuted_jax[5:10]
             visible_cards_p1 = all_cards_permuted_jax[:5]
 
@@ -949,7 +945,7 @@ class CFRAgent:
             game_state_p0.initialize_remaining_cards()
             game_state_p1.initialize_remaining_cards()
 
-            cards_dealt = 10  #  Счетчик розданных карт
+            cards_dealt = 10
 
             while not game_state_p0.board.is_full() or not game_state_p1.board.is_full():
 
@@ -957,67 +953,56 @@ class CFRAgent:
                 if current_player == 0:
                     visible_opponent_cards = visible_cards_p0
                     if fantasy_p1:
-                        visible_opponent_cards = jnp.array([])  #  Пустой массив
-                else:  # current_player == 1
+                        visible_opponent_cards = jnp.array([])
+                else:
                     visible_opponent_cards = visible_cards_p1
                     if fantasy_p0:
-                        visible_opponent_cards = jnp.array([])  #  Пустой массив
+                        visible_opponent_cards = jnp.array([])
 
-                #  Получаем info_set с учетом видимых карт
                 info_set = current_game_state.get_information_set(visible_opponent_cards)
 
                 #  Раздаем карты (если нужно)
                 if len(current_game_state.selected_cards.cards) == 0:
                     if current_game_state.board.is_full():
                         num_cards_to_deal = 0
-                    #  Если оба в "Фантазии", раздаем сразу 14 (или сколько нужно)
                     elif fantasy_p0 and fantasy_p1:
                         if current_game_state.ai_settings['fantasyType'] == 'progressive':
-                            #  Логика для прогрессивной фантазии (14, 15, 16, 17 карт)
                             if current_player == 0:
-                                # num_cards_to_deal = self.get_progressive_fantasy_cards(game_state_p0.board)
                                 num_cards_to_deal = current_game_state.get_progressive_fantasy_cards(jnp.array([card_to_array(card) for card in game_state_p0.board.top]))
                             else:
-                                # num_cards_to_deal = self.get_progressive_fantasy_cards(game_state_p1.board)
                                 num_cards_to_deal = current_game_state.get_progressive_fantasy_cards(jnp.array([card_to_array(card) for card in game_state_p1.board.top]))
-
                         else:
                             num_cards_to_deal = 14
                     elif (len(current_game_state.board.top) + len(current_game_state.board.middle) + len(current_game_state.board.bottom) == 5) or \
                          (len(current_game_state.board.top) + len(current_game_state.board.middle) + len(current_game_state.board.bottom) < 13):
-                        num_cards_to_deal = 3  #  После первых 5 карт и до 13 раздаем по 3
+                        num_cards_to_deal = 3
                     else:
                         num_cards_to_deal = 0
 
                     if num_cards_to_deal > 0:
                         new_cards_jax = all_cards_permuted_jax[cards_dealt:cards_dealt + num_cards_to_deal]
                         new_cards_jax = new_cards_jax[jnp.any(new_cards_jax != -1, axis=1)] # ФИЛЬТРУЕМ
-                        current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax])  # Убрана проверка
+                        current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax])
                         cards_dealt += num_cards_to_deal
                         #  Обновляем видимые карты для соперника (если не в "Фантазии")
                         if current_player == 0 and not fantasy_p1:
                             top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
                             middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
                             bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
-                            
-                            # Filter out the [-1, -1] cards *after* converting to JAX arrays
                             top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
                             middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
                             bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
-                            
                             visible_cards_p0 = jnp.concatenate([top_jax, middle_jax, bottom_jax, new_cards_jax])
 
                         elif current_player == 1 and not fantasy_p0:
                             top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
                             middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
                             bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
-
-                            # Filter out the [-1, -1] cards *after* converting to JAX arrays
                             top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
                             middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
                             bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
-
                             visible_cards_p1 = jnp.concatenate([top_jax, middle_jax, bottom_jax, new_cards_jax])
+
                 #  Получаем доступные действия
                 actions = generate_actions_jax(current_game_state)
                 if not actions.shape[0] == 0:
@@ -1052,22 +1037,22 @@ class CFRAgent:
                     top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
                     middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
                     bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
-                    top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]  # Moved filtering here
-                    middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]  # Moved filtering here
-                    bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]  # Moved filtering here
+                    top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
+                    middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
+                    bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
                     visible_cards_p0 = jnp.concatenate([top_jax, middle_jax, bottom_jax])
                     if fantasy_p1:
-                        visible_cards_p0 = jnp.array([])  #  Пустой массив
+                        visible_cards_p0 = jnp.array([])
                 else:
                     top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
                     middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
                     bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
-                    top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]  # Moved filtering here
-                    middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]  # Moved filtering here
-                    bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]  # Moved filtering here
+                    top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
+                    middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
+                    bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
                     visible_cards_p1 = jnp.concatenate([top_jax, middle_jax, bottom_jax])
                     if fantasy_p0:
-                        visible_cards_p1 = jnp.array([])  #  Пустой массив
+                        visible_cards_p1 = jnp.array([])
 
 
             #  После того, как оба игрока заполнили доски:
