@@ -1,5 +1,5 @@
 import itertools
-from collections import defaultdict, Counter  # Counter, возможно, не понадобится
+from collections import defaultdict
 from threading import Event, Thread
 import time
 import math
@@ -15,7 +15,6 @@ from jax import jit
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
-# ... (Card, Hand, Board - без изменений) ...
 class Card:
     RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
     SUITS = ["♥", "♦", "♣", "♠"]
@@ -141,7 +140,16 @@ class GameState:
         self.deck: jnp.ndarray = deck if deck is not None else self.create_deck_jax() # Используем create_deck_jax
         self.rank_map: Dict[str, int] = {rank: i for i, rank in enumerate(Card.RANKS)}
         self.suit_map: Dict[str, int] = {suit: i for i, suit in enumerate(Card.SUITS)}
-        self.remaining_cards: jnp.ndarray = self.calculate_remaining_cards_jax() # Используем calculate_remaining_cards_jax
+        # self.remaining_cards: jnp.ndarray = self.calculate_remaining_cards_jax() # Используем calculate_remaining_cards_jax
+        self.remaining_cards: jnp.ndarray = GameState.calculate_remaining_cards_jax(
+            self.deck,
+            jnp.array([card_to_array(card) for card in self.discarded_cards]),
+            jnp.array([card_to_array(card) for card in self.board.top]),
+            jnp.array([card_to_array(card) for card in self.board.middle]),
+            jnp.array([card_to_array(card) for card in self.board.bottom]),
+            jnp.array([card_to_array(card) for card in self.selected_cards.cards])
+        )
+
 
     def create_deck_jax(self) -> jnp.ndarray:
         """Creates a standard deck of 52 cards as a JAX array."""
@@ -167,21 +175,22 @@ class GameState:
         return 0
 
     @jit
-    def calculate_remaining_cards_jax(self) -> jnp.ndarray:
+    def calculate_remaining_cards_jax(
+        deck: jnp.ndarray,
+        discarded_cards: jnp.ndarray,
+        top: jnp.ndarray,
+        middle: jnp.ndarray,
+        bottom: jnp.ndarray,
+        selected_cards: jnp.ndarray
+    ) -> jnp.ndarray:
         """Calculates the cards that are not yet placed or discarded (JAX version)."""
-        #  Преобразуем списки карт в JAX массивы
-        discarded_jax = jnp.array([card_to_array(card) for card in self.discarded_cards])
-        top_jax = jnp.array([card_to_array(card) for card in self.board.top])
-        middle_jax = jnp.array([card_to_array(card) for card in self.board.middle])
-        bottom_jax = jnp.array([card_to_array(card) for card in self.board.bottom])
-        selected_jax = jnp.array([card_to_array(card) for card in self.selected_cards.cards])
 
         #  Объединяем все использованные карты
-        used_cards = jnp.concatenate([discarded_jax, top_jax, middle_jax, bottom_jax, selected_jax])
+        used_cards = jnp.concatenate([discarded_cards, top, middle, bottom, selected_cards])
 
         #  Используем jnp.isin для поиска использованных карт в колоде
-        mask = jnp.isin(self.deck, used_cards, invert=True)
-        return self.deck[mask]
+        mask = jnp.isin(deck, used_cards, invert=True)
+        return deck[mask]
 
     @jit
     def get_available_cards_jax(self) -> jnp.ndarray:
@@ -222,7 +231,7 @@ class GameState:
             ai_settings=self.ai_settings,
             deck=self.deck,  #  Используем ту же колоду
         )
-
+        # new_game_state.remaining_cards = new_game_state.calculate_remaining_cards_jax() # Пересчитываем remaining_cards
         return new_game_state
 
     def get_information_set(self, visible_opponent_cards: Optional[jnp.ndarray] = None) -> str:
@@ -1058,10 +1067,6 @@ class CFRAgent:
 
             #  После того, как оба игрока заполнили доски:
             #  1.  Проверяем, попал ли кто-то в "Фантазию"
-            # if not fantasy_p0 and game_state_p0.is_valid_fantasy_entry(): #  Удаляем, т.к. работаем с JAX
-            #     fantasy_p0 = True
-            # if not fantasy_p1 and game_state_p1.is_valid_fantasy_entry(): #  Удаляем, т.к. работаем с JAX
-            #     fantasy_p1 = True
             if not fantasy_p0 and game_state_p0.is_valid_fantasy_entry_jax(jnp.concatenate([
                 jnp.array([card_to_array(card) for card in game_state_p0.board.top]),
                 jnp.array([card_to_array(card) for card in game_state_p0.board.middle]),
@@ -1078,10 +1083,6 @@ class CFRAgent:
                 fantasy_p1 = True
 
             #  2.  Проверяем, может ли кто-то остаться в "Фантазии"
-            # if fantasy_p0 and not game_state_p0.is_valid_fantasy_repeat(game_state_p0.board): #  Удаляем, т.к. работаем с JAX
-            #     fantasy_p0 = False  #  Сбрасываем флаг, если не выполнены условия
-            # if fantasy_p1 and not game_state_p1.is_valid_fantasy_repeat(game_state_p1.board): #  Удаляем, т.к. работаем с JAX
-            #     fantasy_p1 = False
             if fantasy_p0 and not game_state_p0.is_valid_fantasy_repeat_jax(jnp.concatenate([
                 jnp.array([card_to_array(card) for card in game_state_p0.board.top]),
                 jnp.array([card_to_array(card) for card in game_state_p0.board.middle]),
