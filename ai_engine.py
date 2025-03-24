@@ -996,19 +996,29 @@ class CFRAgent:
                         cards_dealt += num_cards_to_deal
                         #  Обновляем видимые карты для соперника (если не в "Фантазии")
                         if current_player == 0 and not fantasy_p1:
-                            visible_cards_p0 = jnp.concatenate([
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                                new_cards_jax
-                            ])
+                            top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
+                            middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
+                            bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
+                            
+                            # Filter out the [-1, -1] cards *after* converting to JAX arrays
+                            top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
+                            middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
+                            bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
+                            
+                            visible_cards_p0 = jnp.concatenate([top_jax, middle_jax, bottom_jax, new_cards_jax])
+
                         elif current_player == 1 and not fantasy_p0:
-                            visible_cards_p1 = jnp.concatenate([
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                                jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                                new_cards_jax
-                            ])
+                            top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
+                            middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
+                            bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
+
+                            # Filter out the [-1, -1] cards *after* converting to JAX arrays
+                            top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
+                            middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
+                            bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
+
+                            visible_cards_p1 = jnp.concatenate([top_jax, middle_jax, bottom_jax, new_cards_jax])
+
                 #  Получаем доступные действия
                 actions = generate_actions_jax(current_game_state)
                 if not actions.shape[0] == 0:
@@ -1040,19 +1050,24 @@ class CFRAgent:
 
                 #  После смены игрока обновляем видимые карты
                 if current_player == 0:
-                    visible_cards_p0 = jnp.concatenate([
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]) # Добавляем проверку
-                    ])
+                    top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
+                    middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
+                    bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
+                    top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
+                    middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
+                    bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
+                    visible_cards_p0 = jnp.concatenate([top_jax, middle_jax, bottom_jax])
+
                     if fantasy_p1:
                         visible_cards_p0 = jnp.array([])  #  Пустой массив
                 else:
-                    visible_cards_p1 = jnp.concatenate([
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.top if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.middle if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]), # Добавляем проверку
-                        jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom if not jnp.all(card_to_array(card) == jnp.array([-1,-1]))]) # Добавляем проверку
-                    ])
+                    top_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.top])
+                    middle_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.middle])
+                    bottom_jax = jnp.array([card_to_array(card) for card in opponent_game_state.board.bottom])
+                    top_jax = top_jax[jnp.any(top_jax != -1, axis=1)]
+                    middle_jax = middle_jax[jnp.any(middle_jax != -1, axis=1)]
+                    bottom_jax = bottom_jax[jnp.any(bottom_jax != -1, axis=1)]
+                    visible_cards_p1 = jnp.concatenate([top_jax, middle_jax, bottom_jax])
                     if fantasy_p0:
                         visible_cards_p1 = jnp.array([])  #  Пустой массив
 
