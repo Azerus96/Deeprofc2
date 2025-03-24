@@ -555,7 +555,7 @@ def card_to_array(card: Optional[Card]) -> jnp.ndarray:
 
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
-    if jnp.array_equal(card_array, jnp.array([-1, -1])):
+        if jnp.all(card_array == jnp.array([-1, -1])):  # Используем jnp.all
         return None  #  Пустой слот
     return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
 
@@ -978,7 +978,6 @@ class CFRAgent:
                                 # num_cards_to_deal = self.get_progressive_fantasy_cards(game_state_p0.board)
                                 num_cards_to_deal = current_game_state.get_progressive_fantasy_cards(jnp.array([card_to_array(card) for card in game_state_p0.board.top]))
                             else:
-                                # num_cards_to_deal = self.get_progressive_fantasy_cards(game_state_p1.board)
                                 num_cards_to_deal = current_game_state.get_progressive_fantasy_cards(jnp.array([card_to_array(card) for card in game_state_p1.board.top]))
 
                         else:
@@ -990,14 +989,11 @@ class CFRAgent:
                         num_cards_to_deal = 0
 
                     if num_cards_to_deal > 0:
-                        # new_cards = all_cards[cards_dealt:cards_dealt + num_cards_to_deal] #  Удаляем, т.к. работаем с JAX
                         new_cards_jax = all_cards_permuted_jax[cards_dealt:cards_dealt + num_cards_to_deal]
-                        # current_game_state.selected_cards = Hand(new_cards) #  Удаляем, т.к. работаем с JAX
                         current_game_state.selected_cards = Hand([array_to_card(c) for c in new_cards_jax])  #  Преобразуем обратно в Card
                         cards_dealt += num_cards_to_deal
                         #  Обновляем видимые карты для соперника (если не в "Фантазии")
                         if current_player == 0 and not fantasy_p1:
-                            # visible_cards_p0 = opponent_game_state.board.top + opponent_game_state.board.middle + opponent_game_state.board.bottom + new_cards #  Удаляем, т.к. работаем с JAX
                             visible_cards_p0 = jnp.concatenate([
                                 jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
                                 jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
@@ -1005,7 +1001,6 @@ class CFRAgent:
                                 new_cards_jax
                             ])
                         elif current_player == 1 and not fantasy_p0:
-                            # visible_cards_p1 = opponent_game_state.board.top + opponent_game_state.board.middle + opponent_game_state.board.bottom + new_cards #  Удаляем, т.к. работаем с JAX
                             visible_cards_p1 = jnp.concatenate([
                                 jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
                                 jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
@@ -1033,7 +1028,6 @@ class CFRAgent:
                     else:
                         pi_1 *= 1.0 / actions.shape[0]
 
-                    # current_game_state = current_game_state.apply_action(action_from_array(actions[action_index])) #  Удаляем action_from_array
                     current_game_state = current_game_state.apply_action(actions[action_index])
                     #  Удаляем карты из selected_cards
                     current_game_state.selected_cards = Hand([])
@@ -1045,7 +1039,6 @@ class CFRAgent:
 
                 #  После смены игрока обновляем видимые карты
                 if current_player == 0:
-                    # visible_cards_p0 = opponent_game_state.board.top + opponent_game_state.board.middle + opponent_game_state.board.bottom #  Удаляем, т.к. работаем с JAX
                     visible_cards_p0 = jnp.concatenate([
                         jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
                         jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
@@ -1054,7 +1047,6 @@ class CFRAgent:
                     if fantasy_p1:
                         visible_cards_p0 = jnp.array([])  #  Пустой массив
                 else:
-                    # visible_cards_p1 = opponent_game_state.board.top + opponent_game_state.board.middle + opponent_game_state.board.bottom #  Удаляем, т.к. работаем с JAX
                     visible_cards_p1 = jnp.concatenate([
                         jnp.array([card_to_array(card) for card in opponent_game_state.board.top]),
                         jnp.array([card_to_array(card) for card in opponent_game_state.board.middle]),
