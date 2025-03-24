@@ -555,7 +555,7 @@ def card_to_array(card: Optional[Card]) -> jnp.ndarray:
 
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
-        if jnp.all(card_array == jnp.array([-1, -1])):  # Используем jnp.all
+    if jnp.all(card_array == jnp.array([-1, -1])):  # Используем jnp.all
         return None  #  Пустой слот
     return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
 
