@@ -140,8 +140,10 @@ class GameState:
         self.deck: jnp.ndarray = deck if deck is not None else self.create_deck_jax() # Используем create_deck_jax
         self.rank_map: Dict[str, int] = {rank: i for i, rank in enumerate(Card.RANKS)}
         self.suit_map: Dict[str, int] = {suit: i for i, suit in enumerate(Card.SUITS)}
-        # self.remaining_cards: jnp.ndarray = self.calculate_remaining_cards_jax() # Используем calculate_remaining_cards_jax
-        self.remaining_cards: jnp.ndarray = GameState.calculate_remaining_cards_jax(
+        self.remaining_cards: jnp.ndarray = jnp.array([]) # Инициализируем пустым массивом
+
+    def initialize_remaining_cards(self):
+        self.remaining_cards = GameState.calculate_remaining_cards_jax(
             self.deck,
             jnp.array([card_to_array(card) for card in self.discarded_cards]),
             jnp.array([card_to_array(card) for card in self.board.top]),
@@ -149,7 +151,6 @@ class GameState:
             jnp.array([card_to_array(card) for card in self.board.bottom]),
             jnp.array([card_to_array(card) for card in self.selected_cards.cards])
         )
-
 
     def create_deck_jax(self) -> jnp.ndarray:
         """Creates a standard deck of 52 cards as a JAX array."""
@@ -231,7 +232,7 @@ class GameState:
             ai_settings=self.ai_settings,
             deck=self.deck,  #  Используем ту же колоду
         )
-        # new_game_state.remaining_cards = new_game_state.calculate_remaining_cards_jax() # Пересчитываем remaining_cards
+        new_game_state.initialize_remaining_cards() # Пересчитываем remaining_cards
         return new_game_state
 
     def get_information_set(self, visible_opponent_cards: Optional[jnp.ndarray] = None) -> str:
@@ -939,16 +940,14 @@ class CFRAgent:
             first_player = current_player
 
             #  Раздаем начальные 5 карт (с учетом видимости)
-            # game_state_p0.selected_cards = Hand(all_cards[:5]) #  Удаляем, т.к. работаем с JAX
-            # game_state_p1.selected_cards = Hand(all_cards[5:10]) #  Удаляем, т.к. работаем с JAX
             game_state_p0.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[:5]])
             game_state_p1.selected_cards = Hand([array_to_card(c) for c in all_cards_permuted_jax[5:10]])
-
-            #  Игроки видят первые 5 карт друг друга
-            # visible_cards_p0 = all_cards[5:10] #  Удаляем, т.к. работаем с JAX
-            # visible_cards_p1 = all_cards[:5] #  Удаляем, т.к. работаем с JAX
             visible_cards_p0 = all_cards_permuted_jax[5:10]
             visible_cards_p1 = all_cards_permuted_jax[:5]
+
+            # Инициализируем remaining_cards *после* раздачи начальных карт
+            game_state_p0.initialize_remaining_cards()
+            game_state_p1.initialize_remaining_cards()
 
             cards_dealt = 10  #  Счетчик розданных карт
 
