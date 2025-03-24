@@ -211,19 +211,29 @@ class GameState:
 
         #  Добавляем карты на доску, пропуская пустые слоты (-1, -1)
         for card_array in top_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])):
+            try:
                 new_board.place_card("top", array_to_card(card_array))
+            except (IndexError, TypeError):
+                pass
         for card_array in middle_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])):
+            try:
                 new_board.place_card("middle", array_to_card(card_array))
+            except (IndexError, TypeError):
+                pass
         for card_array in bottom_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])):
+            try:
                 new_board.place_card("bottom", array_to_card(card_array))
+            except (IndexError, TypeError):
+                pass
 
         #  Добавляем сброшенные карты
         for card_array in discarded_cards:
-            if not jnp.all(card_array == jnp.array([-1, -1])):
-                new_discarded_cards.append(array_to_card(card_array))
+            try:
+                card = array_to_card(card_array)
+                if card:
+                    new_discarded_cards.append(card)
+            except (IndexError, TypeError):
+                pass
 
         new_game_state = GameState(
             selected_cards=[],  #  Очищаем selected_cards
@@ -555,10 +565,10 @@ def card_to_array(card: Optional[Card]) -> jnp.ndarray:
 
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     """Преобразует JAX-массив [rank, suit] обратно в Card."""
-    if jnp.all(card_array == jnp.array([-1, -1])):
+    try:
+        return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
+    except IndexError:
         return None
-    return Card(Card.RANKS[card_array[0]], Card.SUITS[card_array[1]])
-
 
 @jit
 def generate_placements(cards_jax: jnp.ndarray, board: jnp.ndarray, ai_settings: Dict, max_combinations: int = 10000) -> jnp.ndarray:
@@ -749,14 +759,21 @@ def generate_actions_jax(game_state: GameState) -> jnp.ndarray:
                     for action in possible_actions:
                         temp_board = Board()
                         for i in range(3):
-                            if not jnp.all(action[i] == jnp.array([-1, -1])): # Добавляем проверку
+                            try:
                                 temp_board.place_card("top", array_to_card(action[i]))
+                            except (IndexError, TypeError):
+                                pass
                         for i in range(3, 8):
-                            if not jnp.all(action[i] == jnp.array([-1, -1])): # Добавляем проверку
+                            try:
                                 temp_board.place_card("middle", array_to_card(action[i]))
+                            except (IndexError, TypeError):
+                                pass
                         for i in range(8, 13):
-                            if not jnp.all(action[i] == jnp.array([-1, -1])): # Добавляем проверку
+                            try:
                                 temp_board.place_card("bottom", array_to_card(action[i]))
+                            except (IndexError, TypeError):
+                                pass
+
                         temp_boards.append(temp_board)
 
                     #  Векторизуем расчет роялти
