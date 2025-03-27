@@ -6,7 +6,7 @@ from collections import defaultdict, Counter
 from threading import Event, Thread
 import time
 import math
-import logging
+import logging # Убедимся, что logging импортирован
 from typing import List, Dict, Tuple, Optional, Union
 import concurrent.futures # Для параллелизма
 import os # Для определения количества CPU
@@ -250,7 +250,6 @@ class GameState:
         return 0
 
 # --- Вспомогательные JAX функции (оценка рук, роялти, фантазия) ---
-# Этот блок был пропущен в предыдущем ответе, теперь он на месте
 @jit
 def _get_rank_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray:
     if cards_jax.shape[0] == 0: return jnp.zeros(13, dtype=jnp.int32)
@@ -272,14 +271,9 @@ def _is_straight_flush_jax(cards_jax: jnp.ndarray) -> bool:
     if cards_jax.shape[0] != 5: return False; return _is_flush_jax(cards_jax) and _is_straight_jax(cards_jax)
 @jit
 def _is_royal_flush_jax(cards_jax: jnp.ndarray) -> bool:
-    """Проверяет роял-флеш (JAX)."""
-    # ИСПРАВЛЕНО: Разделены if
-    if cards_jax.shape[0] != 5:
-        return False
-    if not _is_straight_flush_jax(cards_jax):
-        return False
-    ranks = jnp.sort(cards_jax[:, 0])
-    return jnp.array_equal(ranks, jnp.array([8, 9, 10, 11, 12])) # Индексы T,J,Q,K,A
+    if cards_jax.shape[0] != 5: return False
+    if not _is_straight_flush_jax(cards_jax): return False
+    ranks = jnp.sort(cards_jax[:, 0]); return jnp.array_equal(ranks, jnp.array([8, 9, 10, 11, 12]))
 @jit
 def _is_four_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
     if cards_jax.shape[0] != 5: return False; return jnp.any(_get_rank_counts_jax(cards_jax) == 4)
@@ -288,16 +282,33 @@ def _is_full_house_jax(cards_jax: jnp.ndarray) -> bool:
     if cards_jax.shape[0] != 5: return False; counts = _get_rank_counts_jax(cards_jax); return jnp.any(counts == 3) and jnp.any(counts == 2)
 @jit
 def _is_three_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
-    n = cards_jax.shape[0]; counts = _get_rank_counts_jax(cards_jax); has_three = jnp.sum(counts == 3) == 1
-    if n == 5: has_pair = jnp.sum(counts == 2) == 1; return has_three and not has_pair
-    elif n == 3: return has_three; else: return False
+    n = cards_jax.shape[0];
+    if n < 3: return False # Нужно хотя бы 3 карты
+    counts = _get_rank_counts_jax(cards_jax); has_three = jnp.sum(counts == 3) == 1
+    if n == 5:
+        has_pair = jnp.sum(counts == 2) == 1; return has_three and not has_pair
+    elif n == 3:
+        # ИСПРАВЛЕНО: else на новой строке
+        return has_three
+    else:
+        # Для n=4 тройка тоже возможна (3 + 1 кикер)
+        if n == 4:
+             has_no_pair = jnp.sum(counts == 2) == 0
+             return has_three and has_no_pair
+        return False
 @jit
 def _is_two_pair_jax(cards_jax: jnp.ndarray) -> bool:
     if cards_jax.shape[0] != 5: return False; return jnp.sum(_get_rank_counts_jax(cards_jax) == 2) == 2
 @jit
 def _is_one_pair_jax(cards_jax: jnp.ndarray) -> bool:
-    n = cards_jax.shape[0]; counts = _get_rank_counts_jax(cards_jax); has_one_pair = jnp.sum(counts == 2) == 1; has_no_better = jnp.sum(counts >= 3) == 0
-    if n == 5: return has_one_pair and has_no_better; elif n == 3: return has_one_pair; elif n == 2: return has_one_pair; elif n == 4: return has_one_pair and has_no_better; else: return False
+    n = cards_jax.shape[0];
+    if n < 2: return False
+    counts = _get_rank_counts_jax(cards_jax); has_one_pair = jnp.sum(counts == 2) == 1; has_no_better = jnp.sum(counts >= 3) == 0
+    if n == 5: return has_one_pair and has_no_better;
+    elif n == 3: return has_one_pair; # Пара на 3 картах
+    elif n == 2: return has_one_pair; # Пара на 2 картах
+    elif n == 4: return has_one_pair and has_no_better; # Пара на 4 картах
+    else: return False
 @jit
 def _identify_combination_jax(cards_jax: jnp.ndarray) -> int:
     n = cards_jax.shape[0]
@@ -778,164 +789,47 @@ class CFRAgent:
                              node.regret_sum = node.regret_sum.at[:num_actions].set(jnp.array(regret_sum_list[:num_actions], dtype=jnp.float32))
                              node.strategy_sum = node.strategy_sum.at[:num_actions].set(jnp.array(strategy_sum_list[:num_actions], dtype=jnp.float32))
                              self.nodes_map[info_hash] = node; num_loaded += 1
-                        else:
-                             # Логируем ошибку, если данные в узле некорректны
-                             logger.warning(f"Data type/length mismatch for node hash {info_hash}. Skipping.")
-                             num_errors += 1
-
-                    except KeyError as e:
-                        # Ошибка, если в данных узла отсутствует нужный ключ
-                        logger.warning(f"Missing key {e} in loaded node data for hash {info_hash}. Skipping node.")
-                        num_errors += 1
-                    except ValueError as e:
-                        # Ошибка при преобразовании хеша в int или другие проблемы с типами
-                        logger.warning(f"Value error (e.g., converting hash) for node hash {info_hash_str}: {e}. Skipping node.")
-                        num_errors += 1
-                    except Exception as e:
-                        # Ловим другие возможные ошибки при обработке конкретного узла
-                        logger.exception(f"Error processing loaded node data for hash {info_hash_str}: {e}. Skipping node.")
-                        num_errors += 1
-
-                # Логируем итоги загрузки
-                logger.info(f"Successfully loaded {num_loaded} nodes from GitHub.")
-                if num_errors > 0:
-                     logger.warning(f"Skipped {num_errors} nodes due to errors during loading.")
-                # Можно решить, нужно ли продолжать обучение с iterations_completed или начать с 0
-                # Например, можно установить счетчик для информации:
-                # self.iterations_completed_so_far = iterations_completed
-
-            else:
-                # Файл не найден или не содержит нужных данных
-                logger.warning("Failed to load progress from GitHub or data is invalid/empty.")
-        except Exception as e:
-            # Ловим ошибки на уровне всего процесса загрузки (например, сетевые)
-            logger.exception(f"Unexpected error during load_progress: {e}")
-
+                        else: logger.warning(f"Data type/length mismatch for node hash {info_hash}. Skipping."); num_errors += 1
+                    except Exception as e: logger.exception(f"Error processing loaded node data for hash {info_hash_str}: {e}. Skipping."); num_errors += 1
+                logger.info(f"Successfully loaded {num_loaded} nodes.");
+                if num_errors > 0: logger.warning(f"Skipped {num_errors} nodes due to errors.")
+            else: logger.warning("Failed to load progress from GitHub or data is invalid/empty.")
+        except Exception as e: logger.exception(f"Unexpected error during load_progress: {e}")
 
     # --- Проверка сходимости ---
     def check_convergence(self) -> bool:
-        """
-        Проверяет, сошлось ли обучение (упрощенная проверка).
-        Считаем сошедшимся, если среднее абсолютное значение сожалений мало.
-        """
-        if not self.nodes_map:
-            logger.info("Convergence check: No nodes found.")
-            return False # Нечего проверять
-
-        total_abs_regret = 0.0
-        total_actions = 0
-        num_nodes_checked = 0
-
-        # Итерируем по значениям словаря узлов
+        """ Проверяет, сошлось ли обучение (упрощенная проверка). """
+        if not self.nodes_map: logger.info("Convergence check: No nodes found."); return False
+        total_abs_regret = 0.0; total_actions = 0; num_nodes_checked = 0
         for node in self.nodes_map.values():
-            if node.num_actions > 0:
-                # Берем только действительные сожаления
-                current_regrets = node.regret_sum[:node.num_actions]
-                total_abs_regret += float(jnp.sum(jnp.abs(current_regrets))) # Преобразуем в float для суммирования
-                total_actions += node.num_actions
-                num_nodes_checked += 1
-
-        if total_actions == 0:
-            logger.info("Convergence check: No actions found in existing nodes.")
-            return False # Нет действий для проверки
-
-        # Вычисляем среднее абсолютное сожаление
-        avg_abs_regret = total_abs_regret / total_actions
-        logger.info(f"Convergence check: Avg absolute regret = {avg_abs_regret:.6f} (threshold: {self.stop_threshold})")
-
-        # Считаем сошедшимся, если среднее сожаление меньше порога
+            if node.num_actions > 0: current_regrets = node.regret_sum[:node.num_actions]; total_abs_regret += float(jnp.sum(jnp.abs(current_regrets))); total_actions += node.num_actions; num_nodes_checked += 1
+        if total_actions == 0: logger.info("Convergence check: No actions found in existing nodes."); return False
+        avg_abs_regret = total_abs_regret / total_actions; logger.info(f"Convergence check: Avg absolute regret = {avg_abs_regret:.6f} (threshold: {self.stop_threshold})")
         return avg_abs_regret < self.stop_threshold
 
 # --- Класс RandomAgent ---
 class RandomAgent:
     """Агент, выбирающий случайное допустимое действие."""
-    def __init__(self):
-        self.key = random.PRNGKey(int(time.time()) + 1) # Отдельный ключ для случайного агента
-        self.ai_settings = {} # Настройки по умолчанию (могут быть переопределены)
-
+    def __init__(self): self.key = random.PRNGKey(int(time.time()) + 1); self.ai_settings = {}
     def get_move(self, game_state: GameState, timeout_event: Event, result: Dict) -> None:
-        """Выбирает случайное допустимое действие."""
-        logger.debug("Inside RandomAgent get_move")
-        # Получаем доступные действия
-        actions_jax = get_actions(game_state)
-        num_actions = actions_jax.shape[0]
-
-        if num_actions == 0:
-            result["move"] = {"error": "Нет доступных ходов"}
-            logger.warning("RandomAgent: No actions available.")
-            return
-
-        # Выбираем случайный индекс
-        self.key, subkey = random.split(self.key)
-        random_index = int(random.choice(subkey, jnp.arange(num_actions)))
-
-        # Преобразуем выбранное действие в словарь
-        move = action_from_array(actions_jax[random_index])
-        result["move"] = move
-        logger.debug(f"RandomAgent selected action index {random_index}: {move}")
-
-    def baseline_evaluation(self, state: GameState) -> float:
-        """Базовая оценка состояния для RandomAgent (можно использовать ту же эвристику)."""
-        # Убедимся, что передаем ai_settings
-        current_ai_settings = getattr(self, 'ai_settings', {})
-        return heuristic_baseline_evaluation(state, current_ai_settings)
-
+        logger.debug("Inside RandomAgent get_move"); actions_jax = get_actions(game_state); num_actions = actions_jax.shape[0]
+        if num_actions == 0: result["move"] = {"error": "Нет доступных ходов"}; logger.warning("RandomAgent: No actions available."); return
+        self.key, subkey = random.split(self.key); random_index = int(random.choice(subkey, jnp.arange(num_actions))); move = action_from_array(actions_jax[random_index]); result["move"] = move; logger.debug(f"RandomAgent selected action index {random_index}: {move}")
+    def baseline_evaluation(self, state: GameState) -> float: current_ai_settings = getattr(self, 'ai_settings', {}); return heuristic_baseline_evaluation(state, current_ai_settings)
     # --- Остальные методы RandomAgent остаются заглушками ---
-    # Эти методы не используются в текущей реализации CFR или RandomAgent,
-    # но могут быть полезны для других типов агентов или анализа.
-    def evaluate_move(self, game_state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float:
-        """Заглушка: Оценка конкретного хода (не реализована)."""
-        logger.warning("RandomAgent.evaluate_move is not implemented.")
-        return 0.0
-    def shallow_search(self, state: GameState, depth: int, timeout_event: Event) -> float:
-        """Заглушка: Поиск на небольшую глубину (не реализован)."""
-        logger.warning("RandomAgent.shallow_search is not implemented.")
-        return 0.0
-    def get_action_value(self, state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float:
-        """Заглушка: Оценка ценности действия через симуляции (не реализована)."""
-        logger.warning("RandomAgent.get_action_value is not implemented.")
-        return 0.0
-    def calculate_potential(self, cards: List[Card], line: str, board: Board, available_cards: List[Card]) -> float:
-        """Заглушка: Расчет потенциала линии (не реализован)."""
-        logger.warning("RandomAgent.calculate_potential is not implemented.")
-        return 0.0
-    def is_flush_potential(self, cards: List[Card], available_cards: List[Card]) -> bool:
-        """Заглушка: Проверка потенциала на флеш (не реализована)."""
-        logger.warning("RandomAgent.is_flush_potential is not implemented.")
-        return False
-    def is_straight_potential(self, cards: List[Card], available_cards: List[Card]) -> bool:
-        """Заглушка: Проверка потенциала на стрит (не реализована)."""
-        logger.warning("RandomAgent.is_straight_potential is not implemented.")
-        return False
-    def is_pair_potential(self, cards: List[Card], available_cards: List[Card]) -> bool:
-        """Заглушка: Проверка потенциала на сет из пары (не реализована)."""
-        logger.warning("RandomAgent.is_pair_potential is not implemented.")
-        return False
-    def evaluate_line_strength(self, cards: List[Card], line: str) -> float:
-        """Заглушка: Оценка силы линии (не реализована)."""
-        logger.warning("RandomAgent.evaluate_line_strength is not implemented.")
-        return 0.0
-    def identify_combination(self, cards: List[Card]) -> None:
-        """Заглушка: Определение комбинации (не реализована, есть JAX-версия)."""
-        logger.warning("RandomAgent.identify_combination is not implemented.")
-        pass
-    def is_bottom_stronger_than_middle(self, state: GameState) -> None:
-        """Заглушка: Проверка порядка линий (не реализована, есть Python-хелпер)."""
-        logger.warning("RandomAgent.is_bottom_stronger_than_middle is not implemented.")
-        pass
-    def is_middle_stronger_than_top(self, state: GameState) -> None:
-        """Заглушка: Проверка порядка линий (не реализована, есть Python-хелпер)."""
-        logger.warning("RandomAgent.is_middle_stronger_than_top is not implemented.")
-        pass
-    def check_row_strength_rule(self, state: GameState) -> None:
-        """Заглушка: Проверка правила силы рядов (не реализована, есть JAX-версия)."""
-        logger.warning("RandomAgent.check_row_strength_rule is not implemented.")
-        pass
-    def save_progress(self) -> None:
-        """RandomAgent не сохраняет прогресс."""
-        pass
-    def load_progress(self) -> None:
-        """RandomAgent не загружает прогресс."""
-        pass
+    def evaluate_move(self, game_state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float: logger.warning("Not implemented"); return 0.0
+    def shallow_search(self, state: GameState, depth: int, timeout_event: Event) -> float: logger.warning("Not implemented"); return 0.0
+    def get_action_value(self, state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float: logger.warning("Not implemented"); return 0.0
+    def calculate_potential(self, cards: List[Card], line: str, board: Board, available_cards: List[Card]) -> float: logger.warning("Not implemented"); return 0.0
+    def is_flush_potential(self, cards: List[Card], available_cards: List[Card]) -> bool: logger.warning("Not implemented"); return False
+    def is_straight_potential(self, cards: List[Card], available_cards: List[Card]) -> bool: logger.warning("Not implemented"); return False
+    def is_pair_potential(self, cards: List[Card], available_cards: List[Card]) -> bool: logger.warning("Not implemented"); return False
+    def evaluate_line_strength(self, cards: List[Card], line: str) -> float: logger.warning("Not implemented"); return 0.0
+    def identify_combination(self, cards: List[Card]) -> None: logger.warning("Not implemented"); pass
+    def is_bottom_stronger_than_middle(self, state: GameState) -> None: logger.warning("Not implemented"); pass
+    def is_middle_stronger_than_top(self, state: GameState) -> None: logger.warning("Not implemented"); pass
+    def check_row_strength_rule(self, state: GameState) -> None: logger.warning("Not implemented"); pass
+    def save_progress(self) -> None: pass
+    def load_progress(self) -> None: pass
 
 # --- Конец файла ai_engine.py ---
