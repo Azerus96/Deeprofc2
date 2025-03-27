@@ -1,14 +1,13 @@
 import ai_engine
-# Убедимся, что github_utils импортируется ПЕРЕД использованием в ai_engine
-# (хотя в данном случае ai_engine импортирует его сам)
 import github_utils
 import getpass
 import time
 import os
 from threading import Event
-import logging # Добавим импорт logging
+import logging
+import multiprocessing as mp # <--- Импортируем multiprocessing
 
-# Настройка логирования (можно настроить уровень и формат)
+# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -31,26 +30,25 @@ def main():
 
     # 2. Настройки AI (общие)
     ai_settings = {
-        'fantasyType': 'normal',  # 'normal' или 'progressive'
-        'aiType': 'mccfr',        # Тип агента
-        'training_mode': True,    # Обязательно True для обучения
-        # Можно добавить лимиты для генерации действий, если нужно переопределить значения по умолчанию
+        'fantasyType': 'normal',
+        'aiType': 'mccfr',
+        'training_mode': True,
         # 'normal_placement_limit': 500,
         # 'fantasy_placement_limit': 2000,
     }
     logger.info(f"AI Settings: {ai_settings}")
 
-    # 3. Параметры обучения CFR (ЯВНО ЗАДАНЫ ЗДЕСЬ)
-    training_iterations = 1000000  # Желаемое количество симуляций игр
-    max_cfr_nodes = 1000000      # Максимальное количество узлов для хранения
-    batch_processing_size = 64   # Количество игр, симулируемых параллельно в батче
-    convergence_threshold = 0.001 # Порог сходимости (среднее абсолютное сожаление)
-    num_parallel_workers = None  # Количество параллельных процессов (None = os.cpu_count())
+    # 3. Параметры обучения CFR
+    training_iterations = 1000000
+    max_cfr_nodes = 1000000
+    batch_processing_size = 64
+    convergence_threshold = 0.001
+    num_parallel_workers = None # None = os.cpu_count()
 
     logger.info(f"Training Parameters: Iterations={training_iterations}, Max Nodes={max_cfr_nodes}, Batch Size={batch_processing_size}, Convergence Threshold={convergence_threshold}, Workers={num_parallel_workers or 'Default (CPU Count)'}")
 
 
-    # 4. Создаем агента CFR с ЯВНО УКАЗАННЫМИ ПАРАМЕТРАМИ
+    # 4. Создаем агента CFR
     try:
         agent = ai_engine.CFRAgent(
             iterations=training_iterations,
@@ -63,28 +61,26 @@ def main():
         logger.info("CFRAgent created successfully with specified parameters.")
     except Exception as e:
         logger.exception("Failed to create CFRAgent. Exiting.")
-        return # Выход, если агент не создан
+        return
 
-    # 5. Загружаем прогресс (если есть и токен предоставлен)
+    # 5. Загружаем прогресс
     agent.load_progress()
 
     # 6. Настраиваем событие для возможной остановки
     timeout_event = Event()
 
     # 7. Запускаем обучение
-    result = {} # Пустой словарь для совместимости сигнатуры train
+    result = {}
     logger.info("Starting agent training...")
     start_time = time.time()
     try:
-        agent.train(timeout_event, result) # Обучение происходит здесь
+        agent.train(timeout_event, result)
     except KeyboardInterrupt:
         logger.warning("Training interrupted by user (KeyboardInterrupt).")
-        # Агент должен сохраняться периодически и в конце train
     except Exception as e:
         logger.exception("An error occurred during training.")
-        # Попытка сохранить прогресс даже при ошибке
         logger.info("Attempting to save progress after error...")
-        agent.save_progress(0) # Передаем 0, т.к. точное число неизвестно
+        agent.save_progress(0)
 
     end_time = time.time()
     logger.info(f"Training process finished or interrupted in {end_time - start_time:.2f} seconds.")
@@ -93,4 +89,22 @@ def main():
 
 
 if __name__ == "__main__":
+    # --- ВАЖНО: Устанавливаем метод старта multiprocessing ---
+    # Делаем это *перед* любым созданием пула процессов (внутри agent.train)
+    # и внутри блока if __name__ == "__main__"
+    try:
+        # 'spawn' безопаснее для JAX и других библиотек с потоками
+        mp.set_start_method('spawn', force=True)
+        logger.info("Multiprocessing start method set to 'spawn'.")
+    except RuntimeError as e:
+        # Контекст может быть уже установлен (например, в некоторых средах)
+        logger.warning(f"Could not set multiprocessing start method (possibly already set): {e}")
+        current_method = mp.get_start_method()
+        logger.info(f"Current multiprocessing start method: '{current_method}'")
+        if current_method != 'spawn':
+             logger.warning("Current start method is not 'spawn', potential issues with JAX might still occur.")
+    except Exception as e:
+        logger.exception("An unexpected error occurred while setting multiprocessing start method.")
+
+    # Запускаем основную функцию
     main()
