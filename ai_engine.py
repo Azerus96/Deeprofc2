@@ -8,15 +8,15 @@ import time
 import math
 import logging
 from typing import List, Dict, Tuple, Optional, Union
-import concurrent.futures  # Для параллелизма
-import os  # Для определения количества CPU
+import concurrent.futures # Для параллелизма
+import os # Для определения количества CPU
 
 # --- Импорты библиотек машинного обучения и вычислений ---
 import jax.numpy as jnp
 import jax
 from jax import random
 from jax import jit
-import numpy as np  # Используем numpy для некоторых операций, не требующих JIT
+import numpy as np # Используем numpy для некоторых операций, не требующих JIT
 
 # --- Импорт утилит для GitHub (с обработкой отсутствия) ---
 try:
@@ -35,7 +35,6 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
 # --- Класс Card ---
 class Card:
     """Представляет игральную карту с рангом и мастью."""
@@ -45,231 +44,125 @@ class Card:
     SUIT_MAP = {suit: i for i, suit in enumerate(SUITS)}
 
     def __init__(self, rank: str, suit: str):
-        if rank not in self.RANKS:
-            raise ValueError(f"Invalid rank: {rank}")
-        if suit not in self.SUITS:
-            raise ValueError(f"Invalid suit: {suit}")
-        self.rank = rank
-        self.suit = suit
-
-    def __repr__(self) -> str:
-        return f"{self.rank}{self.suit}"
-
+        if rank not in self.RANKS: raise ValueError(f"Invalid rank: {rank}")
+        if suit not in self.SUITS: raise ValueError(f"Invalid suit: {suit}")
+        self.rank = rank; self.suit = suit
+    def __repr__(self) -> str: return f"{self.rank}{self.suit}"
     def __eq__(self, other: Union["Card", Dict]) -> bool:
-        if isinstance(other, dict):
-            return self.rank == other.get("rank") and self.suit == other.get("suit")
+        if isinstance(other, dict): return self.rank == other.get("rank") and self.suit == other.get("suit")
         return isinstance(other, Card) and self.rank == other.rank and self.suit == other.suit
-
-    def __hash__(self) -> int:
-        return hash((self.rank, self.suit))
-
-    def to_dict(self) -> Dict[str, str]:
-        return {"rank": self.rank, "suit": self.suit}
-
+    def __hash__(self) -> int: return hash((self.rank, self.suit))
+    def to_dict(self) -> Dict[str, str]: return {"rank": self.rank, "suit": self.suit}
     @staticmethod
-    def from_dict(card_dict: Dict[str, str]) -> "Card":
-        return Card(card_dict["rank"], card_dict["suit"])
-
+    def from_dict(card_dict: Dict[str, str]) -> "Card": return Card(card_dict["rank"], card_dict["suit"])
     @staticmethod
-    def get_all_cards() -> List["Card"]:
-        return [Card(r, s) for r in Card.RANKS for s in Card.SUITS]
-
+    def get_all_cards() -> List["Card"]: return [Card(r, s) for r in Card.RANKS for s in Card.SUITS]
 
 # --- Класс Hand ---
 class Hand:
     """Представляет руку игрока."""
     def __init__(self, cards: Optional[List[Card]] = None):
         if isinstance(cards, jnp.ndarray):
-            cards_list = [array_to_card(c) for c in cards if not jnp.array_equal(c, jnp.array([-1, -1]))]
-            self.cards = [c for c in cards_list if c is not None]
-        else:
-            self.cards = cards if cards is not None else []
-
+             cards_list = [array_to_card(c) for c in cards if not jnp.array_equal(c, jnp.array([-1, -1]))]
+             self.cards = [c for c in cards_list if c is not None]
+        else: self.cards = cards if cards is not None else []
     def add_card(self, card: Card) -> None:
-        if not isinstance(card, Card):
-            raise TypeError("card must be an instance of Card")
+        if not isinstance(card, Card): raise TypeError("card must be an instance of Card")
         self.cards.append(card)
-
     def add_cards(self, cards_to_add: List[Card]) -> None:
-        for card in cards_to_add:
-            self.add_card(card)
-
+        for card in cards_to_add: self.add_card(card)
     def remove_card(self, card: Card) -> None:
-        if not isinstance(card, Card):
-            raise TypeError("card must be an instance of Card")
-        try:
-            self.cards.remove(card)
-        except ValueError:
-            logger.warning(f"Card {card} not found in hand to remove: {self.cards}")
-
+        if not isinstance(card, Card): raise TypeError("card must be an instance of Card")
+        try: self.cards.remove(card)
+        except ValueError: logger.warning(f"Card {card} not found in hand to remove: {self.cards}")
     def remove_cards(self, cards_to_remove: List[Card]) -> None:
-        temp_hand = self.cards[:]
-        removed_count = 0
+        temp_hand = self.cards[:]; removed_count = 0
         for card_to_remove in cards_to_remove:
-            try:
-                temp_hand.remove(card_to_remove)
-                removed_count += 1
-            except ValueError:
-                logger.warning(f"Card {card_to_remove} not found in hand during multi-remove.")
-        if removed_count != len(cards_to_remove):
-            logger.warning(f"Expected to remove {len(cards_to_remove)}, removed {removed_count}.")
+            try: temp_hand.remove(card_to_remove); removed_count += 1
+            except ValueError: logger.warning(f"Card {card_to_remove} not found in hand during multi-remove.")
+        if removed_count != len(cards_to_remove): logger.warning(f"Expected to remove {len(cards_to_remove)}, removed {removed_count}.")
         self.cards = temp_hand
-
     def __repr__(self) -> str:
         st = lambda cards: ", ".join(map(str, sorted(cards, key=lambda c: (Card.RANK_MAP.get(c.rank, -1), Card.SUIT_MAP.get(c.suit, -1)))))
         return f"Hand: [{st(self.cards)}]"
-
-    def __len__(self) -> int:
-        return len(self.cards)
-
-    def __iter__(self):
-        return iter(self.cards)
-
-    def __getitem__(self, index: int) -> Card:
-        return self.cards[index]
-
+    def __len__(self) -> int: return len(self.cards)
+    def __iter__(self): return iter(self.cards)
+    def __getitem__(self, index: int) -> Card: return self.cards[index]
     def to_jax(self) -> jnp.ndarray:
-        if not self.cards:
-            return jnp.empty((0, 2), dtype=jnp.int32)
-        return jnp.array([card_to_array(card) for card in self.cards], dtype=jnp.int32)
-
+         if not self.cards: return jnp.empty((0, 2), dtype=jnp.int32)
+         return jnp.array([card_to_array(card) for card in self.cards], dtype=jnp.int32)
 
 # --- Класс Board ---
 class Board:
     """Представляет доску игрока с тремя линиями."""
-    def __init__(self):
-        self.top: List[Card] = []
-        self.middle: List[Card] = []
-        self.bottom: List[Card] = []
-
-    def get_placed_count(self) -> int:
-        return len(self.top) + len(self.middle) + len(self.bottom)
-
+    def __init__(self): self.top: List[Card] = []; self.middle: List[Card] = []; self.bottom: List[Card] = []
+    def get_placed_count(self) -> int: return len(self.top) + len(self.middle) + len(self.bottom)
     def place_card(self, line: str, card: Card) -> None:
         target_line = getattr(self, line, None)
-        if target_line is None:
-            raise ValueError(f"Invalid line: {line}")
+        if target_line is None: raise ValueError(f"Invalid line: {line}")
         max_len = 3 if line == "top" else 5
-        if len(target_line) >= max_len:
-            raise ValueError(f"{line.capitalize()} line is full ({len(target_line)}/{max_len})")
+        if len(target_line) >= max_len: raise ValueError(f"{line.capitalize()} line is full ({len(target_line)}/{max_len})")
         target_line.append(card)
-
-    def is_full(self) -> bool:
-        return len(self.top) == 3 and len(self.middle) == 5 and len(self.bottom) == 5
-
-    def clear(self) -> None:
-        self.top = []
-        self.middle = []
-        self.bottom = []
-
+    def is_full(self) -> bool: return len(self.top) == 3 and len(self.middle) == 5 and len(self.bottom) == 5
+    def clear(self) -> None: self.top = []; self.middle = []; self.bottom = []
     def __repr__(self) -> str:
         st = lambda cards: ", ".join(map(str, sorted(cards, key=lambda c: (Card.RANK_MAP.get(c.rank, -1), Card.SUIT_MAP.get(c.suit, -1)))))
         return f"Top: [{st(self.top)}]\nMiddle: [{st(self.middle)}]\nBottom: [{st(self.bottom)}]"
-
     def get_cards(self, line: str) -> List[Card]:
-        if line == "top":
-            return self.top
-        elif line == "middle":
-            return self.middle
-        elif line == "bottom":
-            return self.bottom
-        else:
-            # ИСПРАВЛЕНО: Перенос на новую строку
-            raise ValueError("Invalid line specified")
-
-    def get_all_cards(self) -> List[Card]:
-        return self.top + self.middle + self.bottom
-
+        if line == "top": return self.top
+        elif line == "middle": return self.middle
+        elif line == "bottom": return self.bottom
+        else: raise ValueError("Invalid line specified")
+    def get_all_cards(self) -> List[Card]: return self.top + self.middle + self.bottom
     def get_line_jax(self, line: str) -> jnp.ndarray:
         cards = self.get_cards(line)
-        if not cards:
-            return jnp.empty((0, 2), dtype=jnp.int32)
+        if not cards: return jnp.empty((0, 2), dtype=jnp.int32)
         return jnp.array([card_to_array(card) for card in cards], dtype=jnp.int32)
-
     def to_jax_placement(self) -> jnp.ndarray:
-        placement = jnp.full((13, 2), -1, dtype=jnp.int32)
-        idx = 0
+        placement = jnp.full((13, 2), -1, dtype=jnp.int32); idx = 0
         for card in self.top:
-            if idx < 3:
-                placement = placement.at[idx].set(card_to_array(card))
-                idx += 1
+             if idx < 3: placement = placement.at[idx].set(card_to_array(card)); idx += 1
         idx = 3
         for card in self.middle:
-            if idx < 8:
-                placement = placement.at[idx].set(card_to_array(card))
-                idx += 1
+             if idx < 8: placement = placement.at[idx].set(card_to_array(card)); idx += 1
         idx = 8
         for card in self.bottom:
-            if idx < 13:
-                placement = placement.at[idx].set(card_to_array(card))
-                idx += 1
+             if idx < 13: placement = placement.at[idx].set(card_to_array(card)); idx += 1
         return placement
-
 
 # --- Вспомогательные функции для преобразования Card <-> JAX array ---
 def card_to_array(card: Optional[Card]) -> jnp.ndarray:
-    if card is None:
-        return jnp.array([-1, -1], dtype=jnp.int32)
+    if card is None: return jnp.array([-1, -1], dtype=jnp.int32)
     return jnp.array([Card.RANK_MAP.get(card.rank, -1), Card.SUIT_MAP.get(card.suit, -1)], dtype=jnp.int32)
-
 def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
-    if card_array is None or card_array.shape != (2,) or jnp.array_equal(card_array, jnp.array([-1, -1])):
-        return None
+    if card_array is None or card_array.shape != (2,) or jnp.array_equal(card_array, jnp.array([-1, -1])): return None
     try:
-        rank_idx = int(card_array[0])
-        suit_idx = int(card_array[1])
-        if 0 <= rank_idx < len(Card.RANKS) and 0 <= suit_idx < len(Card.SUITS):
-            # ИСПРАВЛЕНО: Перенос на новую строку
-            return Card(Card.RANKS[rank_idx], Card.SUITS[suit_idx])
-        else:
-            # ИСПРАВЛЕНО: Перенос на новую строку
-            return None
-    except (IndexError, ValueError):
-        return None
-
+        rank_idx = int(card_array[0]); suit_idx = int(card_array[1])
+        if 0 <= rank_idx < len(Card.RANKS) and 0 <= suit_idx < len(Card.SUITS): return Card(Card.RANKS[rank_idx], Card.SUITS[suit_idx])
+        else: return None
+    except (IndexError, ValueError): return None
 def action_to_jax(action_dict: Dict[str, List[Card]]) -> jnp.ndarray:
-    action_array = jnp.full((17, 2), -1, dtype=jnp.int32)
-    idx = 0
+    action_array = jnp.full((17, 2), -1, dtype=jnp.int32); idx = 0
     for card in action_dict.get("top", []):
-        if idx < 3:
-            action_array = action_array.at[idx].set(card_to_array(card))
-            idx += 1
-    idx = 3
+        if idx < 3: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
+    idx = 3;
     for card in action_dict.get("middle", []):
-        if idx < 8:
-            action_array = action_array.at[idx].set(card_to_array(card))
-            idx += 1
-    idx = 8
+        if idx < 8: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
+    idx = 8;
     for card in action_dict.get("bottom", []):
-        if idx < 13:
-            action_array = action_array.at[idx].set(card_to_array(card))
-            idx += 1
-    idx = 13
+        if idx < 13: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
+    idx = 13;
     for card in action_dict.get("discarded", []):
-        if idx < 17:
-            action_array = action_array.at[idx].set(card_to_array(card))
-            idx += 1
+        if idx < 17: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
     return action_array
-
 def action_from_array(action_array: jnp.ndarray) -> Dict[str, List[Card]]:
-    if action_array is None or action_array.shape != (17, 2):
-        logger.error(f"Invalid shape for action_array: {action_array.shape if action_array is not None else 'None'}")
-        return {}
+    if action_array is None or action_array.shape != (17, 2): logger.error(f"Invalid shape for action_array: {action_array.shape if action_array is not None else 'None'}"); return {}
     action_dict = {"top": [], "middle": [], "bottom": [], "discarded": []}
-    for i in range(3):
-        card = array_to_card(action_array[i])
-        if card: action_dict["top"].append(card)
-    for i in range(3, 8):
-        card = array_to_card(action_array[i])
-        if card: action_dict["middle"].append(card)
-    for i in range(8, 13):
-        card = array_to_card(action_array[i])
-        if card: action_dict["bottom"].append(card)
-    for i in range(13, 17):
-        card = array_to_card(action_array[i])
-        if card: action_dict["discarded"].append(card)
+    for i in range(3): card = array_to_card(action_array[i]); action_dict["top"].append(card) if card else None
+    for i in range(3, 8): card = array_to_card(action_array[i]); action_dict["middle"].append(card) if card else None
+    for i in range(8, 13): card = array_to_card(action_array[i]); action_dict["bottom"].append(card) if card else None
+    for i in range(13, 17): card = array_to_card(action_array[i]); action_dict["discarded"].append(card) if card else None
     return {k: v for k, v in action_dict.items() if v}
-
 
 # --- Класс GameState ---
 class GameState:
@@ -288,22 +181,18 @@ class GameState:
         self.current_player: int = current_player; self.deck: List[Card] = deck if deck is not None else []
         self.opponent_board: Board = opponent_board if opponent_board is not None else Board()
         self.opponent_discarded: List[Card] = opponent_discarded if opponent_discarded is not None else []
-
     def get_current_player(self) -> int: return self.current_player
     def is_terminal(self) -> bool: return self.board.is_full()
-
     def get_street(self) -> int:
         placed = self.board.get_placed_count()
-        if placed == 0: return 1
-        if placed == 5: return 2
-        if placed == 7: return 3
-        if placed == 9: return 4
-        if placed == 11: return 5
-        if placed == 13: return 6
-        if placed < 5: return 1
-        logger.warning(f"Unexpected placed cards ({placed}) for street calc.")
-        return 0
-
+        if placed == 0: return 1;
+        if placed == 5: return 2;
+        if placed == 7: return 3;
+        if placed == 9: return 4;
+        if placed == 11: return 5;
+        if placed == 13: return 6;
+        if placed < 5: return 1;
+        logger.warning(f"Unexpected placed cards ({placed}) for street calc."); return 0
     def apply_action(self, action: Dict[str, List[Card]]) -> "GameState":
         new_board = Board(); new_board.top=self.board.top[:]; new_board.middle=self.board.middle[:]; new_board.bottom=self.board.bottom[:]
         new_discarded = self.discarded_cards[:]; placed_in_action = []; discarded_in_action = action.get("discarded", [])
@@ -316,13 +205,11 @@ class GameState:
                               ai_settings=self.ai_settings.copy(), deck=self.deck, current_player=self.current_player,
                               opponent_board=self.opponent_board, opponent_discarded=self.opponent_discarded)
         return new_state
-
     def get_information_set(self) -> str:
         st = lambda cards: ",".join(map(str, sorted(cards, key=lambda c: (Card.RANK_MAP.get(c.rank, -1), Card.SUIT_MAP.get(c.suit, -1)))))
         street = f"St:{self.get_street()}"; my_board = f"T:{st(self.board.top)}|M:{st(self.board.middle)}|B:{st(self.board.bottom)}"
         my_disc = f"D:{st(self.discarded_cards)}"; opp_board = f"OT:{st(self.opponent_board.top)}|OM:{st(self.opponent_board.middle)}|OB:{st(self.opponent_board.bottom)}"
         opp_disc = f"OD:{st(self.opponent_discarded)}"; return f"{street}|{my_board}|{my_disc}|{opp_board}|{opp_disc}"
-
     def _calculate_pairwise_score(self, opponent_board: Board) -> int:
         line_score = 0; cmp_b = _compare_hands_py(self.board.get_line_jax("bottom"), opponent_board.get_line_jax("bottom"))
         cmp_m = _compare_hands_py(self.board.get_line_jax("middle"), opponent_board.get_line_jax("middle"))
@@ -330,7 +217,6 @@ class GameState:
         line_score += cmp_b + cmp_m + cmp_t
         scoop = 3 if cmp_b == 1 and cmp_m == 1 and cmp_t == 1 else (-3 if cmp_b == -1 and cmp_m == -1 and cmp_t == -1 else 0)
         return line_score + scoop
-
     def get_payoff(self) -> int:
         if not self.is_terminal() or not self.opponent_board.is_full(): logger.warning("get_payoff on non-terminal state(s)."); return 0
         my_place = self.board.to_jax_placement(); opp_place = self.opponent_board.to_jax_placement()
@@ -342,15 +228,12 @@ class GameState:
         if i_am_dead: return -6 - opp_royalty
         if opp_is_dead: return 6 + my_royalty
         pairwise_score = self._calculate_pairwise_score(self.opponent_board); return pairwise_score + my_royalty - opp_royalty
-
     def is_valid_fantasy_entry(self) -> bool:
         if not self.board.is_full(): return False; place = self.board.to_jax_placement()
         if is_dead_hand_jax(place, self.ai_settings): return False; return is_valid_fantasy_entry_jax(place, self.ai_settings)
-
     def is_valid_fantasy_repeat(self) -> bool:
         if not self.board.is_full(): return False; place = self.board.to_jax_placement()
         if is_dead_hand_jax(place, self.ai_settings): return False; return is_valid_fantasy_repeat_jax(place, self.ai_settings)
-
     def get_fantasy_cards_count(self) -> int:
         place = self.board.to_jax_placement(); top_cards = place[0:3][jnp.any(place[0:3] != -1, axis=1)]
         if top_cards.shape[0] != 3: return 0; top_rank, _ = evaluate_hand_jax(top_cards)
@@ -358,14 +241,13 @@ class GameState:
             if top_rank == 6: return 17
             if top_rank == 8:
                 pair_idx = jnp.where(jnp.bincount(top_cards[:, 0], length=13) == 2)[0][0]
-                if pair_idx == Card.RANK_MAP['A']: return 16
-                if pair_idx == Card.RANK_MAP['K']: return 15
-                if pair_idx == Card.RANK_MAP['Q']: return 14
+                if pair_idx == Card.RANK_MAP['A']: return 16;
+                if pair_idx == Card.RANK_MAP['K']: return 15;
+                if pair_idx == Card.RANK_MAP['Q']: return 14;
         elif top_rank <= 8:
              pair_idx = jnp.where(jnp.bincount(top_cards[:, 0], length=13) == 2)[0][0] if top_rank == 8 else -1
              if top_rank == 6 or pair_idx >= Card.RANK_MAP['Q']: return 14
         return 0
-
 
 # --- Вспомогательные JAX функции (оценка рук, роялти, фантазия) ---
 @jit
@@ -405,15 +287,13 @@ def _is_three_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
     counts = _get_rank_counts_jax(cards_jax); has_three = jnp.sum(counts == 3) == 1
     if n == 5:
         has_pair = jnp.sum(counts == 2) == 1; return has_three and not has_pair
+    # ИСПРАВЛЕНО: else на новой строке
     elif n == 3:
-        # ИСПРАВЛЕНО: else на новой строке
         return has_three
     else:
-        # Для n=4 тройка тоже возможна (3 + 1 кикер)
         if n == 4:
              has_no_pair = jnp.sum(counts == 2) == 0
              return has_three and has_no_pair
-        # ИСПРАВЛЕНО: else на новой строке
         return False
 @jit
 def _is_two_pair_jax(cards_jax: jnp.ndarray) -> bool:
@@ -423,42 +303,33 @@ def _is_one_pair_jax(cards_jax: jnp.ndarray) -> bool:
     n = cards_jax.shape[0];
     if n < 2: return False
     counts = _get_rank_counts_jax(cards_jax); has_one_pair = jnp.sum(counts == 2) == 1; has_no_better = jnp.sum(counts >= 3) == 0
-    if n == 5:
-        return has_one_pair and has_no_better
-    elif n == 3:
-        # ИСПРАВЛЕНО: Перенос на новую строку
-        return has_one_pair
-    elif n == 2:
-        # ИСПРАВЛЕНО: Перенос на новую строку
-        return has_one_pair
-    elif n == 4:
-        # ИСПРАВЛЕНО: Перенос на новую строку
-        return has_one_pair and has_no_better
-    else:
-        # ИСПРАВЛЕНО: Перенос на новую строку
-        return False
+    if n == 5: return has_one_pair and has_no_better;
+    elif n == 3: return has_one_pair;
+    elif n == 2: return has_one_pair;
+    elif n == 4: return has_one_pair and has_no_better;
+    else: return False
 @jit
 def _identify_combination_jax(cards_jax: jnp.ndarray) -> int:
     n = cards_jax.shape[0]
     if n == 5:
-        if _is_royal_flush_jax(cards_jax): return 0
-        if _is_straight_flush_jax(cards_jax): return 1
-        if _is_four_of_a_kind_jax(cards_jax): return 2
-        if _is_full_house_jax(cards_jax): return 3
-        if _is_flush_jax(cards_jax): return 4
-        if _is_straight_jax(cards_jax): return 5
-        if _is_three_of_a_kind_jax(cards_jax): return 6
-        if _is_two_pair_jax(cards_jax): return 7
-        if _is_one_pair_jax(cards_jax): return 8
+        if _is_royal_flush_jax(cards_jax): return 0;
+        if _is_straight_flush_jax(cards_jax): return 1;
+        if _is_four_of_a_kind_jax(cards_jax): return 2;
+        if _is_full_house_jax(cards_jax): return 3;
+        if _is_flush_jax(cards_jax): return 4;
+        if _is_straight_jax(cards_jax): return 5;
+        if _is_three_of_a_kind_jax(cards_jax): return 6;
+        if _is_two_pair_jax(cards_jax): return 7;
+        if _is_one_pair_jax(cards_jax): return 8;
         return 9
     elif n == 3:
-        if _is_three_of_a_kind_jax(cards_jax): return 6
-        if _is_one_pair_jax(cards_jax): return 8
+        if _is_three_of_a_kind_jax(cards_jax): return 6;
+        if _is_one_pair_jax(cards_jax): return 8;
         return 9
     elif n == 0: return 10
     else: # n=1,2,4
-        if n >= 2 and _is_one_pair_jax(cards_jax): return 8
-        if n >= 1: return 9
+        if n >= 2 and _is_one_pair_jax(cards_jax): return 8;
+        if n >= 1: return 9;
         return 10
 @jit
 def evaluate_hand_jax(cards_jax: jnp.ndarray) -> Tuple[int, jnp.ndarray]:
@@ -500,9 +371,7 @@ def calculate_royalties_jax(board: Board, ai_settings: Dict) -> jnp.ndarray:
 def is_valid_fantasy_entry_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
     top_cards = placement[0:3]; top_rank, _ = evaluate_hand_jax(top_cards)
     if top_rank == 8: pair_rank_idx = jnp.where(jnp.bincount(top_cards[:, 0], length=13) == 2)[0][0]; return pair_rank_idx >= Card.RANK_MAP['Q']
-    elif top_rank == 6: return True
-    # ИСПРАВЛЕНО: Перенос на новую строку
-    return False
+    elif top_rank == 6: return True; return False
 @jit
 def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
     top_cards = placement[0:3]; bottom_cards = placement[8:13]
@@ -514,9 +383,10 @@ def _generate_placements_recursive(cards_to_place: List[Card], current_board_jax
     if max_placements is not None and len(valid_placements) >= max_placements: return True
     if card_idx == len(cards_to_place):
         placed_count = jnp.sum(jnp.any(current_board_jax != -1, axis=1)); is_potentially_full = (placed_count == 13)
+        # ИСПРАВЛЕНО: Убрана проверка is_dead_hand_jax для неполных досок
         if is_potentially_full:
             if not is_dead_hand_jax(current_board_jax, ai_settings): valid_placements.append(current_board_jax.copy())
-        else: valid_placements.append(current_board_jax.copy())
+        else: valid_placements.append(current_board_jax.copy()) # Неполная доска не мертвая
         return False
     card = cards_to_place[card_idx]; card_arr = card_to_array(card); limit_reached = False
     top_indices = jnp.arange(3); top_occupied = jnp.any(current_board_jax[top_indices] != -1, axis=1); first_free_top = jnp.where(~top_occupied, top_indices, 3)[0]
@@ -553,7 +423,8 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         if street == 1:
             if num_cards_in_hand == 5: num_to_place, num_to_discard = 5, 0
             else: logger.error(f"Street 1 error: Hand={num_cards_in_hand} != 5"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
-            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000) # Увеличенный лимит
+            # ИСПРАВЛЕНО: Увеличен лимит для Street 1
+            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000)
             logger.debug(f"Using increased placement limit for Street 1: {placement_limit}")
         elif 2 <= street <= 5:
             if num_cards_in_hand == 3: num_to_place, num_to_discard = 2, 1
@@ -579,14 +450,11 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
     logger.debug(f"Generated {len(possible_actions_list)} raw actions")
     if not possible_actions_list: logger.warning(f"No valid actions generated for Player {game_state.current_player}!"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
     else:
-        # ИСПРАВЛЕНО: Перенос на новую строку
         if not all(a.shape == (17, 2) for a in possible_actions_list):
              logger.error("Inconsistent action shapes generated!"); correct_shape_actions = [a for a in possible_actions_list if a.shape == (17, 2)]
              if not correct_shape_actions: return jnp.empty((0, 17, 2), dtype=jnp.int32)
              return jnp.stack(correct_shape_actions)
-        else:
-             # ИСПРАВЛЕНО: Перенос на новую строку
-             return jnp.stack(possible_actions_list)
+        else: return jnp.stack(possible_actions_list)
 
 # --- Вспомогательные функции для эвристической оценки (Python) ---
 def _evaluate_partial_combination_py(cards: List[Card], row_type: str) -> float:
@@ -941,30 +809,5 @@ class CFRAgent:
         if total_actions == 0: logger.info("Convergence check: No actions found in existing nodes."); return False
         avg_abs_regret = total_abs_regret / total_actions; logger.info(f"Convergence check: Avg absolute regret = {avg_abs_regret:.6f} (threshold: {self.stop_threshold})")
         return avg_abs_regret < self.stop_threshold
-
-# --- Класс RandomAgent ---
-class RandomAgent:
-    """Агент, выбирающий случайное допустимое действие."""
-    def __init__(self): self.key = random.PRNGKey(int(time.time()) + 1); self.ai_settings = {}
-    def get_move(self, game_state: GameState, timeout_event: Event, result: Dict) -> None:
-        logger.debug("Inside RandomAgent get_move"); actions_jax = get_actions(game_state); num_actions = actions_jax.shape[0]
-        if num_actions == 0: result["move"] = {"error": "Нет доступных ходов"}; logger.warning("RandomAgent: No actions available."); return
-        self.key, subkey = random.split(self.key); random_index = int(random.choice(subkey, jnp.arange(num_actions))); move = action_from_array(actions_jax[random_index]); result["move"] = move; logger.debug(f"RandomAgent selected action index {random_index}: {move}")
-    def baseline_evaluation(self, state: GameState) -> float: current_ai_settings = getattr(self, 'ai_settings', {}); return heuristic_baseline_evaluation(state, current_ai_settings)
-    # --- Остальные методы RandomAgent остаются заглушками ---
-    def evaluate_move(self, game_state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float: logger.warning("Not implemented"); return 0.0
-    def shallow_search(self, state: GameState, depth: int, timeout_event: Event) -> float: logger.warning("Not implemented"); return 0.0
-    def get_action_value(self, state: GameState, action: Dict[str, List[Card]], timeout_event: Event) -> float: logger.warning("Not implemented"); return 0.0
-    def calculate_potential(self, cards: List[Card], line: str, board: Board, available_cards: List[Card]) -> float: logger.warning("Not implemented"); return 0.0
-    def is_flush_potential(self, cards: List[Card], available_cards: List[Card]) -> bool: logger.warning("Not implemented"); return False
-    def is_straight_potential(self, cards: List[Card], available_cards: List[Card]) -> bool: logger.warning("Not implemented"); return False
-    def is_pair_potential(self, cards: List[Card], available_cards: List[Card]) -> bool: logger.warning("Not implemented"); return False
-    def evaluate_line_strength(self, cards: List[Card], line: str) -> float: logger.warning("Not implemented"); return 0.0
-    def identify_combination(self, cards: List[Card]) -> None: logger.warning("Not implemented"); pass
-    def is_bottom_stronger_than_middle(self, state: GameState) -> None: logger.warning("Not implemented"); pass
-    def is_middle_stronger_than_top(self, state: GameState) -> None: logger.warning("Not implemented"); pass
-    def check_row_strength_rule(self, state: GameState) -> None: logger.warning("Not implemented"); pass
-    def save_progress(self) -> None: pass
-    def load_progress(self) -> None: pass
 
 # --- Конец файла ai_engine.py ---
