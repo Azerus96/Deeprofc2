@@ -112,7 +112,9 @@ class Board:
         if line == "top": return self.top
         elif line == "middle": return self.middle
         elif line == "bottom": return self.bottom
-        else: raise ValueError("Invalid line specified")
+        # ИСПРАВЛЕНО: else на новой строке
+        else:
+            raise ValueError("Invalid line specified")
     def get_all_cards(self) -> List[Card]: return self.top + self.middle + self.bottom
     def get_line_jax(self, line: str) -> jnp.ndarray:
         cards = self.get_cards(line)
@@ -138,8 +140,11 @@ def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     if card_array is None or card_array.shape != (2,) or jnp.array_equal(card_array, jnp.array([-1, -1])): return None
     try:
         rank_idx = int(card_array[0]); suit_idx = int(card_array[1])
-        if 0 <= rank_idx < len(Card.RANKS) and 0 <= suit_idx < len(Card.SUITS): return Card(Card.RANKS[rank_idx], Card.SUITS[suit_idx])
-        else: return None
+        # ИСПРАВЛЕНО: else на новой строке
+        if 0 <= rank_idx < len(Card.RANKS) and 0 <= suit_idx < len(Card.SUITS):
+            return Card(Card.RANKS[rank_idx], Card.SUITS[suit_idx])
+        else:
+            return None
     except (IndexError, ValueError): return None
 def action_to_jax(action_dict: Dict[str, List[Card]]) -> jnp.ndarray:
     action_array = jnp.full((17, 2), -1, dtype=jnp.int32); idx = 0
@@ -303,11 +308,17 @@ def _is_one_pair_jax(cards_jax: jnp.ndarray) -> bool:
     n = cards_jax.shape[0];
     if n < 2: return False
     counts = _get_rank_counts_jax(cards_jax); has_one_pair = jnp.sum(counts == 2) == 1; has_no_better = jnp.sum(counts >= 3) == 0
-    if n == 5: return has_one_pair and has_no_better;
-    elif n == 3: return has_one_pair;
-    elif n == 2: return has_one_pair;
-    elif n == 4: return has_one_pair and has_no_better;
-    else: return False
+    if n == 5:
+        return has_one_pair and has_no_better
+    # ИСПРАВЛЕНО: elif/else на новых строках
+    elif n == 3:
+        return has_one_pair
+    elif n == 2:
+        return has_one_pair
+    elif n == 4:
+        return has_one_pair and has_no_better
+    else:
+        return False
 @jit
 def _identify_combination_jax(cards_jax: jnp.ndarray) -> int:
     n = cards_jax.shape[0]
@@ -423,8 +434,7 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         if street == 1:
             if num_cards_in_hand == 5: num_to_place, num_to_discard = 5, 0
             else: logger.error(f"Street 1 error: Hand={num_cards_in_hand} != 5"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
-            # ИСПРАВЛЕНО: Увеличен лимит для Street 1
-            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000)
+            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000) # Увеличенный лимит для Street 1
             logger.debug(f"Using increased placement limit for Street 1: {placement_limit}")
         elif 2 <= street <= 5:
             if num_cards_in_hand == 3: num_to_place, num_to_discard = 2, 1
@@ -450,11 +460,13 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
     logger.debug(f"Generated {len(possible_actions_list)} raw actions")
     if not possible_actions_list: logger.warning(f"No valid actions generated for Player {game_state.current_player}!"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
     else:
+        # ИСПРАВЛЕНО: else на новой строке
         if not all(a.shape == (17, 2) for a in possible_actions_list):
              logger.error("Inconsistent action shapes generated!"); correct_shape_actions = [a for a in possible_actions_list if a.shape == (17, 2)]
              if not correct_shape_actions: return jnp.empty((0, 17, 2), dtype=jnp.int32)
              return jnp.stack(correct_shape_actions)
-        else: return jnp.stack(possible_actions_list)
+        else:
+             return jnp.stack(possible_actions_list)
 
 # --- Вспомогательные функции для эвристической оценки (Python) ---
 def _evaluate_partial_combination_py(cards: List[Card], row_type: str) -> float:
