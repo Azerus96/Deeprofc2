@@ -6,7 +6,7 @@ from collections import defaultdict, Counter
 from threading import Event, Thread
 import time
 import math
-import logging # Убедимся, что logging импортирован
+import logging
 from typing import List, Dict, Tuple, Optional, Union
 import concurrent.futures # Для параллелизма
 import os # Для определения количества CPU
@@ -283,7 +283,7 @@ def _is_full_house_jax(cards_jax: jnp.ndarray) -> bool:
 @jit
 def _is_three_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
     n = cards_jax.shape[0];
-    if n < 3: return False # Нужно хотя бы 3 карты
+    if n < 3: return False
     counts = _get_rank_counts_jax(cards_jax); has_three = jnp.sum(counts == 3) == 1
     if n == 5:
         has_pair = jnp.sum(counts == 2) == 1; return has_three and not has_pair
@@ -305,9 +305,9 @@ def _is_one_pair_jax(cards_jax: jnp.ndarray) -> bool:
     if n < 2: return False
     counts = _get_rank_counts_jax(cards_jax); has_one_pair = jnp.sum(counts == 2) == 1; has_no_better = jnp.sum(counts >= 3) == 0
     if n == 5: return has_one_pair and has_no_better;
-    elif n == 3: return has_one_pair; # Пара на 3 картах
-    elif n == 2: return has_one_pair; # Пара на 2 картах
-    elif n == 4: return has_one_pair and has_no_better; # Пара на 4 картах
+    elif n == 3: return has_one_pair;
+    elif n == 2: return has_one_pair;
+    elif n == 4: return has_one_pair and has_no_better;
     else: return False
 @jit
 def _identify_combination_jax(cards_jax: jnp.ndarray) -> int:
@@ -423,12 +423,15 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         if street == 1:
             if num_cards_in_hand == 5: num_to_place, num_to_discard = 5, 0
             else: logger.error(f"Street 1 error: Hand={num_cards_in_hand} != 5"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+            # --- ИСПРАВЛЕНИЕ: Увеличен лимит для Street 1 ---
+            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000)
+            logger.debug(f"Using increased placement limit for Street 1: {placement_limit}")
         elif 2 <= street <= 5:
             if num_cards_in_hand == 3: num_to_place, num_to_discard = 2, 1
             else: logger.error(f"Street {street} error: Hand={num_cards_in_hand} != 3"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+            placement_limit = game_state.ai_settings.get("normal_placement_limit", 500)
         else: logger.error(f"get_actions on invalid street {street}"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
         logger.debug(f"Street {street} Action: Hand={num_cards_in_hand}, Place={num_to_place}, Discard={num_to_discard}")
-        placement_limit = game_state.ai_settings.get("normal_placement_limit", 500)
 
     action_count_this_hand = 0; max_actions_per_hand = placement_limit * 10
     for cards_to_place_tuple in itertools.combinations(hand_cards, num_to_place):
