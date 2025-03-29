@@ -1,4 +1,4 @@
-# ai_engine.py (Merged Version with Action Generation Fix)
+# ai_engine.py (Merged Version with Action Generation Fix v2)
 
 # --- Стандартные импорты ---
 import itertools
@@ -467,42 +467,31 @@ def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bo
 # --- Функции генерации действий ---
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# START OF CORRECTED _generate_placements_recursive FUNCTION
+# START OF REVISED _generate_placements_recursive FUNCTION (v2)
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 def _generate_placements_recursive(
     cards_to_place: List[Card],
     current_board_jax: jnp.ndarray, # Shape (13, 2)
-    ai_settings: Dict,
+    ai_settings: Dict, # Keep ai_settings for potential future use, though not used now
     card_idx: int,
     valid_placements: List[jnp.ndarray],
     max_placements: Optional[int] = 1000
 ) -> bool: # Returns True if limit was reached
     """
     Recursively explores placements for cards_to_place onto current_board_jax.
-    Appends valid final placements (shape (13, 2)) to valid_placements list.
+    Appends ALL physically possible final placements (shape (13, 2)) to valid_placements list.
+    Dead hand check is REMOVED from this function.
     """
     # Check limit at the beginning of the call
     if max_placements is not None and len(valid_placements) >= max_placements:
-        # logger.debug(f"Placement limit ({max_placements}) hit during recursion.") # Optional: debug log
         return True # Signal limit reached
 
     # Base Case: All cards for this step have been placed
     if card_idx == len(cards_to_place):
-        placed_count = jnp.sum(jnp.any(current_board_jax != -1, axis=1))
-        is_potentially_full = (placed_count == 13)
+        # Append the completed placement WITHOUT checking for dead hand here
+        valid_placements.append(current_board_jax)
 
-        # Only check for dead hand if the board is potentially full (13 cards placed)
-        # NOTE: is_dead_hand_jax calling _compare_hands_py inside JIT is slow/problematic.
-        # This check should ideally happen *after* generation if performance matters.
-        # For now, we keep the original logic structure.
-        if is_potentially_full:
-            # *** Potential Performance Bottleneck / JIT Issue Here ***
-            if not is_dead_hand_jax(current_board_jax, ai_settings):
-                 valid_placements.append(current_board_jax) # No copy needed if JAX arrays are treated immutably
-        else:
-             valid_placements.append(current_board_jax) # Incomplete board is never dead
-
-        # Check limit again after potentially adding a placement
+        # Check limit again after adding a placement
         if max_placements is not None and len(valid_placements) >= max_placements:
             return True
         return False # Base case finished, limit not reached here
@@ -515,41 +504,34 @@ def _generate_placements_recursive(
     # Try placing in Top line
     top_indices = jnp.arange(3)
     top_occupied = jnp.any(current_board_jax[top_indices] != -1, axis=1)
-    # Find the first index 'i' where top_occupied[i] is False
-    first_free_top_candidates = jnp.where(~top_occupied, top_indices, 3) # Get indices or 3 if occupied
+    first_free_top_candidates = jnp.where(~top_occupied, top_indices, 3)
     if first_free_top_candidates.size > 0 and first_free_top_candidates[0] < 3:
         first_free_top = first_free_top_candidates[0]
-        # Create the *next* board state by placing the current card
         next_placement_top = current_board_jax.at[first_free_top].set(card_arr)
-        # Recurse for the *next* card (card_idx + 1) using the *new* board state
         limit_reached = _generate_placements_recursive(
             cards_to_place, next_placement_top, ai_settings, card_idx + 1, valid_placements, max_placements
         )
-        if limit_reached: return True # Propagate limit signal
+        if limit_reached: return True
 
-    # Try placing in Middle line (only if limit not reached in Top branch)
+    # Try placing in Middle line
     mid_indices = jnp.arange(3, 8)
     mid_occupied = jnp.any(current_board_jax[mid_indices] != -1, axis=1)
     first_free_mid_candidates = jnp.where(~mid_occupied, mid_indices, 8)
     if first_free_mid_candidates.size > 0 and first_free_mid_candidates[0] < 8:
         first_free_mid = first_free_mid_candidates[0]
-        # Create the *next* board state from the *original* current_board_jax
         next_placement_mid = current_board_jax.at[first_free_mid].set(card_arr)
-        # Recurse for the *next* card using this *new* board state
         limit_reached = _generate_placements_recursive(
             cards_to_place, next_placement_mid, ai_settings, card_idx + 1, valid_placements, max_placements
         )
         if limit_reached: return True
 
-    # Try placing in Bottom line (only if limit not reached in Top/Middle branches)
+    # Try placing in Bottom line
     bot_indices = jnp.arange(8, 13)
     bot_occupied = jnp.any(current_board_jax[bot_indices] != -1, axis=1)
     first_free_bot_candidates = jnp.where(~bot_occupied, bot_indices, 13)
     if first_free_bot_candidates.size > 0 and first_free_bot_candidates[0] < 13:
         first_free_bot = first_free_bot_candidates[0]
-        # Create the *next* board state from the *original* current_board_jax
         next_placement_bot = current_board_jax.at[first_free_bot].set(card_arr)
-        # Recurse for the *next* card using this *new* board state
         limit_reached = _generate_placements_recursive(
             cards_to_place, next_placement_bot, ai_settings, card_idx + 1, valid_placements, max_placements
         )
@@ -557,7 +539,7 @@ def _generate_placements_recursive(
 
     return False # Finished exploring branches for this card_idx, limit not hit in this path
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-# END OF CORRECTED _generate_placements_recursive FUNCTION
+# END OF REVISED _generate_placements_recursive FUNCTION (v2)
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
@@ -566,8 +548,11 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
     if game_state.is_terminal(): logger.debug("get_actions - Board is full"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
     hand_cards = game_state.selected_cards.cards; num_cards_in_hand = len(hand_cards)
     if num_cards_in_hand == 0: logger.debug("get_actions - No cards in hand"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+
     possible_actions_list = []; street = game_state.get_street(); is_fantasy_turn = game_state.ai_settings.get("in_fantasy_turn", False)
     num_to_place, num_to_discard = 0, 0; placement_limit = 500
+
+    # Determine number of cards to place/discard based on street/fantasy
     if is_fantasy_turn:
         num_to_place = 13; num_to_discard = num_cards_in_hand - num_to_place
         if num_to_discard < 0: logger.error(f"Fantasy error: Hand={num_cards_in_hand} < 13"); num_to_place=num_cards_in_hand; num_to_discard=0
@@ -578,7 +563,7 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         if street == 1:
             if num_cards_in_hand == 5: num_to_place, num_to_discard = 5, 0
             else: logger.error(f"Street 1 error: Hand={num_cards_in_hand} != 5"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
-            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000) # Увеличенный лимит для Street 1
+            placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000)
             logger.debug(f"Using increased placement limit for Street 1: {placement_limit}")
         elif 2 <= street <= 5:
             if num_cards_in_hand == 3: num_to_place, num_to_discard = 2, 1
@@ -588,24 +573,50 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         logger.debug(f"Street {street} Action: Hand={num_cards_in_hand}, Place={num_to_place}, Discard={num_to_discard}")
 
     action_count_this_hand = 0; max_actions_per_hand = placement_limit * 10 # Heuristic limit
+
+    # Iterate through combinations of cards to place
     for cards_to_place_tuple in itertools.combinations(hand_cards, num_to_place):
         if action_count_this_hand >= max_actions_per_hand: logger.warning(f"Max actions per hand ({max_actions_per_hand}) reached."); break
         cards_to_place = list(cards_to_place_tuple); cards_to_discard = [card for card in hand_cards if card not in cards_to_place]
-        if len(cards_to_discard) != num_to_discard: continue # Should not happen with combinations logic
+        if len(cards_to_discard) != num_to_discard: continue
 
-        initial_placement_jax = game_state.board.to_jax_placement(); valid_placements_for_combo = []
-        limit_was_reached = _generate_placements_recursive(cards_to_place, initial_placement_jax, game_state.ai_settings, 0, valid_placements_for_combo, max_placements=placement_limit)
+        initial_placement_jax = game_state.board.to_jax_placement()
+        potential_placements_for_combo = [] # Raw placements from recursion
+
+        # Generate all physical placements (no dead hand check inside)
+        limit_was_reached = _generate_placements_recursive(
+            cards_to_place, initial_placement_jax, game_state.ai_settings, 0, potential_placements_for_combo, max_placements=placement_limit
+        )
         if limit_was_reached: logger.warning(f"Placement limit ({placement_limit}) reached for combo: {cards_to_place}")
 
+        # Prepare discard array
         discard_jax = jnp.full((4, 2), -1, dtype=jnp.int32)
         for i, card in enumerate(cards_to_discard):
             if i < 4: discard_jax = discard_jax.at[i].set(card_to_array(card))
 
-        for placement_13 in valid_placements_for_combo:
-            action_17 = jnp.concatenate((placement_13, discard_jax), axis=0); possible_actions_list.append(action_17); action_count_this_hand += 1
-            if action_count_this_hand >= max_actions_per_hand: break # Check inner loop limit too
+        # Filter generated placements for dead hands *after* recursion
+        for placement_13 in potential_placements_for_combo:
+            # Check if this placement represents a full board state
+            # (Only full boards can be dead according to OFC rules)
+            placed_count = jnp.sum(jnp.any(placement_13 != -1, axis=1))
+            is_potentially_full = (placed_count == 13)
 
-    logger.debug(f"Generated {len(possible_actions_list)} raw actions")
+            # If it's potentially full, check if it's dead. Otherwise, it's valid.
+            is_valid_placement = True
+            if is_potentially_full:
+                # Call is_dead_hand_jax *outside* the recursive loop
+                if is_dead_hand_jax(placement_13, game_state.ai_settings):
+                    is_valid_placement = False
+                    # logger.debug(f"Filtering dead hand placement: {placement_13}") # Optional debug
+
+            if is_valid_placement:
+                action_17 = jnp.concatenate((placement_13, discard_jax), axis=0)
+                possible_actions_list.append(action_17)
+                action_count_this_hand += 1
+                if action_count_this_hand >= max_actions_per_hand: break # Check inner loop limit too
+        # End of filtering loop
+
+    logger.debug(f"Generated {len(possible_actions_list)} valid (non-dead) actions")
     if not possible_actions_list: logger.warning(f"No valid actions generated for Player {game_state.current_player}!"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
     else:
         # Validate shapes before stacking
@@ -615,6 +626,7 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
              return jnp.stack(correct_shape_actions)
         else:
              return jnp.stack(possible_actions_list)
+
 
 # --- Вспомогательные функции для эвристической оценки (Python) ---
 def _evaluate_partial_combination_py(cards: List[Card], row_type: str) -> float:
