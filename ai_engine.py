@@ -1,4 +1,4 @@
-# ai_engine.py (Merged Version)
+# ai_engine.py (Merged Version with Action Generation Fix)
 
 # --- Стандартные импорты ---
 import itertools
@@ -112,7 +112,6 @@ class Board:
         if line == "top": return self.top
         elif line == "middle": return self.middle
         elif line == "bottom": return self.bottom
-        # Syntax fix preserved
         else:
             raise ValueError("Invalid line specified")
     def get_all_cards(self) -> List[Card]: return self.top + self.middle + self.bottom
@@ -140,7 +139,6 @@ def array_to_card(card_array: jnp.ndarray) -> Optional[Card]:
     if card_array is None or card_array.shape != (2,) or jnp.array_equal(card_array, jnp.array([-1, -1])): return None
     try:
         rank_idx = int(card_array[0]); suit_idx = int(card_array[1])
-        # Syntax fix preserved
         if 0 <= rank_idx < len(Card.RANKS) and 0 <= suit_idx < len(Card.SUITS):
             return Card(Card.RANKS[rank_idx], Card.SUITS[suit_idx])
         else:
@@ -150,20 +148,19 @@ def action_to_jax(action_dict: Dict[str, List[Card]]) -> jnp.ndarray:
     action_array = jnp.full((17, 2), -1, dtype=jnp.int32); idx = 0
     for card in action_dict.get("top", []):
         if idx < 3: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
-    idx = 3; # Syntax fix preserved (semicolon allows this, but separate lines are often preferred)
+    idx = 3;
     for card in action_dict.get("middle", []):
         if idx < 8: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
-    idx = 8; # Syntax fix preserved
+    idx = 8;
     for card in action_dict.get("bottom", []):
         if idx < 13: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
-    idx = 13; # Syntax fix preserved
+    idx = 13;
     for card in action_dict.get("discarded", []):
         if idx < 17: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
     return action_array
 def action_from_array(action_array: jnp.ndarray) -> Dict[str, List[Card]]:
     if action_array is None or action_array.shape != (17, 2): logger.error(f"Invalid shape for action_array: {action_array.shape if action_array is not None else 'None'}"); return {}
     action_dict = {"top": [], "middle": [], "bottom": [], "discarded": []}
-    # Syntax fix preserved (using 'if card else None' is concise)
     for i in range(3): card = array_to_card(action_array[i]); action_dict["top"].append(card) if card else None
     for i in range(3, 8): card = array_to_card(action_array[i]); action_dict["middle"].append(card) if card else None
     for i in range(8, 13): card = array_to_card(action_array[i]); action_dict["bottom"].append(card) if card else None
@@ -191,7 +188,6 @@ class GameState:
     def is_terminal(self) -> bool: return self.board.is_full()
     def get_street(self) -> int:
         placed = self.board.get_placed_count()
-        # Syntax fix preserved (semicolons allow this, but separate lines are often preferred)
         if placed == 0: return 1;
         if placed == 5: return 2;
         if placed == 7: return 3;
@@ -252,7 +248,6 @@ class GameState:
             if top_rank == 6: return 17
             if top_rank == 8:
                 pair_idx = jnp.where(jnp.bincount(top_cards[:, 0], length=13) == 2)[0][0]
-                # Syntax fix preserved (semicolons allow this, but separate lines are often preferred)
                 if pair_idx == Card.RANK_MAP['A']: return 16;
                 if pair_idx == Card.RANK_MAP['K']: return 15;
                 if pair_idx == Card.RANK_MAP['Q']: return 14;
@@ -301,15 +296,11 @@ def _is_three_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
     if n == 5:
         has_pair = jnp.sum(counts == 2) == 1; return has_three and not has_pair
     elif n == 3:
-        # Syntax from old_ai.py (seems correct here)
         return has_three
     else:
-        # Syntax from old_ai.py (seems correct here)
-        # Для n=4 тройка тоже возможна (3 + 1 кикер)
         if n == 4:
              has_no_pair = jnp.sum(counts == 2) == 0
              return has_three and has_no_pair
-        # Syntax from old_ai.py (seems correct here)
         return False
 @jit
 def _is_two_pair_jax(cards_jax: jnp.ndarray) -> bool:
@@ -322,16 +313,12 @@ def _is_one_pair_jax(cards_jax: jnp.ndarray) -> bool:
     if n == 5:
         return has_one_pair and has_no_better
     elif n == 3:
-        # Syntax from old_ai.py (seems correct here)
         return has_one_pair
     elif n == 2:
-        # Syntax from old_ai.py (seems correct here)
         return has_one_pair
     elif n == 4:
-        # Syntax from old_ai.py (seems correct here)
         return has_one_pair and has_no_better
     else:
-        # Syntax from old_ai.py (seems correct here)
         return False
 @jit
 def _identify_combination_jax(cards_jax: jnp.ndarray) -> int:
@@ -385,11 +372,15 @@ def is_dead_hand_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
     # Only compare if the relevant lines are full
     cmp_top_mid = 0
     if is_top_full and is_middle_full:
-        cmp_top_mid = _compare_hands_py(top_cards, middle_cards) # Note: Calling _py version inside JIT is usually bad, but it seems intended here.
+        # *** WARNING: Calling _py version inside JIT is usually bad practice ***
+        # This might cause performance issues or errors under strict JIT.
+        # Consider implementing _compare_hands_jax if needed.
+        cmp_top_mid = _compare_hands_py(top_cards, middle_cards)
 
     cmp_mid_bot = 0
     if is_middle_full and is_bottom_full:
-        cmp_mid_bot = _compare_hands_py(middle_cards, bottom_cards) # Note: Calling _py version inside JIT is usually bad, but it seems intended here.
+        # *** WARNING: Calling _py version inside JIT is usually bad practice ***
+        cmp_mid_bot = _compare_hands_py(middle_cards, bottom_cards)
 
     # A hand is dead if a *completed* higher line is weaker than a *completed* lower line
     is_dead = False
@@ -457,7 +448,6 @@ def is_valid_fantasy_entry_jax(placement: jnp.ndarray, ai_settings: Dict) -> boo
         return pair_rank_idx >= Card.RANK_MAP['Q'] # QQ or higher
     elif top_rank == 6: # Set
         return True
-    # Syntax from old_ai.py (seems correct here)
     return False
 @jit
 def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
@@ -475,36 +465,101 @@ def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bo
 # END OF BLOCK COPIED FROM old_ai.py
 
 # --- Функции генерации действий ---
-def _generate_placements_recursive(cards_to_place: List[Card], current_board_jax: jnp.ndarray, ai_settings: Dict, card_idx: int, valid_placements: List[jnp.ndarray], max_placements: Optional[int] = 1000):
-    if max_placements is not None and len(valid_placements) >= max_placements: return True
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# START OF CORRECTED _generate_placements_recursive FUNCTION
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+def _generate_placements_recursive(
+    cards_to_place: List[Card],
+    current_board_jax: jnp.ndarray, # Shape (13, 2)
+    ai_settings: Dict,
+    card_idx: int,
+    valid_placements: List[jnp.ndarray],
+    max_placements: Optional[int] = 1000
+) -> bool: # Returns True if limit was reached
+    """
+    Recursively explores placements for cards_to_place onto current_board_jax.
+    Appends valid final placements (shape (13, 2)) to valid_placements list.
+    """
+    # Check limit at the beginning of the call
+    if max_placements is not None and len(valid_placements) >= max_placements:
+        # logger.debug(f"Placement limit ({max_placements}) hit during recursion.") # Optional: debug log
+        return True # Signal limit reached
+
+    # Base Case: All cards for this step have been placed
     if card_idx == len(cards_to_place):
-        placed_count = jnp.sum(jnp.any(current_board_jax != -1, axis=1)); is_potentially_full = (placed_count == 13)
-        # PRESERVED FIX: Only check dead hand if the board is potentially full (13 cards placed)
+        placed_count = jnp.sum(jnp.any(current_board_jax != -1, axis=1))
+        is_potentially_full = (placed_count == 13)
+
+        # Only check for dead hand if the board is potentially full (13 cards placed)
+        # NOTE: is_dead_hand_jax calling _compare_hands_py inside JIT is slow/problematic.
+        # This check should ideally happen *after* generation if performance matters.
+        # For now, we keep the original logic structure.
         if is_potentially_full:
-            # Note: is_dead_hand_jax might be slow if called frequently due to _compare_hands_py call inside JIT context.
-            # Consider optimizing is_dead_hand_jax further if performance is critical here.
+            # *** Potential Performance Bottleneck / JIT Issue Here ***
             if not is_dead_hand_jax(current_board_jax, ai_settings):
-                 valid_placements.append(current_board_jax.copy())
+                 valid_placements.append(current_board_jax) # No copy needed if JAX arrays are treated immutably
         else:
-             valid_placements.append(current_board_jax.copy()) # Incomplete board is never dead
-        return False
-    card = cards_to_place[card_idx]; card_arr = card_to_array(card); limit_reached = False
-    top_indices = jnp.arange(3); top_occupied = jnp.any(current_board_jax[top_indices] != -1, axis=1); first_free_top = jnp.where(~top_occupied, top_indices, 3)[0]
-    if first_free_top < 3:
-        next_placement = current_board_jax.at[first_free_top].set(card_arr)
-        limit_reached = _generate_placements_recursive(cards_to_place, next_placement, ai_settings, card_idx + 1, valid_placements, max_placements);
+             valid_placements.append(current_board_jax) # Incomplete board is never dead
+
+        # Check limit again after potentially adding a placement
+        if max_placements is not None and len(valid_placements) >= max_placements:
+            return True
+        return False # Base case finished, limit not reached here
+
+    # --- Recursive Step ---
+    card = cards_to_place[card_idx]
+    card_arr = card_to_array(card)
+    limit_reached = False
+
+    # Try placing in Top line
+    top_indices = jnp.arange(3)
+    top_occupied = jnp.any(current_board_jax[top_indices] != -1, axis=1)
+    # Find the first index 'i' where top_occupied[i] is False
+    first_free_top_candidates = jnp.where(~top_occupied, top_indices, 3) # Get indices or 3 if occupied
+    if first_free_top_candidates.size > 0 and first_free_top_candidates[0] < 3:
+        first_free_top = first_free_top_candidates[0]
+        # Create the *next* board state by placing the current card
+        next_placement_top = current_board_jax.at[first_free_top].set(card_arr)
+        # Recurse for the *next* card (card_idx + 1) using the *new* board state
+        limit_reached = _generate_placements_recursive(
+            cards_to_place, next_placement_top, ai_settings, card_idx + 1, valid_placements, max_placements
+        )
+        if limit_reached: return True # Propagate limit signal
+
+    # Try placing in Middle line (only if limit not reached in Top branch)
+    mid_indices = jnp.arange(3, 8)
+    mid_occupied = jnp.any(current_board_jax[mid_indices] != -1, axis=1)
+    first_free_mid_candidates = jnp.where(~mid_occupied, mid_indices, 8)
+    if first_free_mid_candidates.size > 0 and first_free_mid_candidates[0] < 8:
+        first_free_mid = first_free_mid_candidates[0]
+        # Create the *next* board state from the *original* current_board_jax
+        next_placement_mid = current_board_jax.at[first_free_mid].set(card_arr)
+        # Recurse for the *next* card using this *new* board state
+        limit_reached = _generate_placements_recursive(
+            cards_to_place, next_placement_mid, ai_settings, card_idx + 1, valid_placements, max_placements
+        )
         if limit_reached: return True
-    mid_indices = jnp.arange(3, 8); mid_occupied = jnp.any(current_board_jax[mid_indices] != -1, axis=1); first_free_mid = jnp.where(~mid_occupied, mid_indices, 8)[0]
-    if first_free_mid < 8:
-        next_placement = current_board_jax.at[first_free_mid].set(card_arr)
-        limit_reached = _generate_placements_recursive(cards_to_place, next_placement, ai_settings, card_idx + 1, valid_placements, max_placements);
+
+    # Try placing in Bottom line (only if limit not reached in Top/Middle branches)
+    bot_indices = jnp.arange(8, 13)
+    bot_occupied = jnp.any(current_board_jax[bot_indices] != -1, axis=1)
+    first_free_bot_candidates = jnp.where(~bot_occupied, bot_indices, 13)
+    if first_free_bot_candidates.size > 0 and first_free_bot_candidates[0] < 13:
+        first_free_bot = first_free_bot_candidates[0]
+        # Create the *next* board state from the *original* current_board_jax
+        next_placement_bot = current_board_jax.at[first_free_bot].set(card_arr)
+        # Recurse for the *next* card using this *new* board state
+        limit_reached = _generate_placements_recursive(
+            cards_to_place, next_placement_bot, ai_settings, card_idx + 1, valid_placements, max_placements
+        )
         if limit_reached: return True
-    bot_indices = jnp.arange(8, 13); bot_occupied = jnp.any(current_board_jax[bot_indices] != -1, axis=1); first_free_bot = jnp.where(~bot_occupied, bot_indices, 13)[0]
-    if first_free_bot < 13:
-        next_placement = current_board_jax.at[first_free_bot].set(card_arr)
-        limit_reached = _generate_placements_recursive(cards_to_place, next_placement, ai_settings, card_idx + 1, valid_placements, max_placements);
-        if limit_reached: return True
-    return False
+
+    return False # Finished exploring branches for this card_idx, limit not hit in this path
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# END OF CORRECTED _generate_placements_recursive FUNCTION
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
 
 def get_actions(game_state: GameState) -> jnp.ndarray:
     logger.debug(f"get_actions - START | Player: {game_state.current_player} | Street: {game_state.get_street()}")
@@ -532,24 +587,28 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         else: logger.error(f"get_actions on invalid street {street}"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
         logger.debug(f"Street {street} Action: Hand={num_cards_in_hand}, Place={num_to_place}, Discard={num_to_discard}")
 
-    action_count_this_hand = 0; max_actions_per_hand = placement_limit * 10
+    action_count_this_hand = 0; max_actions_per_hand = placement_limit * 10 # Heuristic limit
     for cards_to_place_tuple in itertools.combinations(hand_cards, num_to_place):
         if action_count_this_hand >= max_actions_per_hand: logger.warning(f"Max actions per hand ({max_actions_per_hand}) reached."); break
         cards_to_place = list(cards_to_place_tuple); cards_to_discard = [card for card in hand_cards if card not in cards_to_place]
-        if len(cards_to_discard) != num_to_discard: continue
+        if len(cards_to_discard) != num_to_discard: continue # Should not happen with combinations logic
+
         initial_placement_jax = game_state.board.to_jax_placement(); valid_placements_for_combo = []
         limit_was_reached = _generate_placements_recursive(cards_to_place, initial_placement_jax, game_state.ai_settings, 0, valid_placements_for_combo, max_placements=placement_limit)
         if limit_was_reached: logger.warning(f"Placement limit ({placement_limit}) reached for combo: {cards_to_place}")
+
         discard_jax = jnp.full((4, 2), -1, dtype=jnp.int32)
         for i, card in enumerate(cards_to_discard):
             if i < 4: discard_jax = discard_jax.at[i].set(card_to_array(card))
+
         for placement_13 in valid_placements_for_combo:
             action_17 = jnp.concatenate((placement_13, discard_jax), axis=0); possible_actions_list.append(action_17); action_count_this_hand += 1
-            if action_count_this_hand >= max_actions_per_hand: break
+            if action_count_this_hand >= max_actions_per_hand: break # Check inner loop limit too
+
     logger.debug(f"Generated {len(possible_actions_list)} raw actions")
     if not possible_actions_list: logger.warning(f"No valid actions generated for Player {game_state.current_player}!"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
     else:
-        # Syntax fix preserved
+        # Validate shapes before stacking
         if not all(a.shape == (17, 2) for a in possible_actions_list):
              logger.error("Inconsistent action shapes generated!"); correct_shape_actions = [a for a in possible_actions_list if a.shape == (17, 2)]
              if not correct_shape_actions: return jnp.empty((0, 17, 2), dtype=jnp.int32)
@@ -570,7 +629,6 @@ def _evaluate_partial_combination_py(cards: List[Card], row_type: str) -> float:
             is_connector = all(unique_ranks[i+1] - unique_ranks[i] == 1 for i in range(un - 1)); gaps = sum(unique_ranks[i+1] - unique_ranks[i] - 1 for i in range(un - 1)); span = unique_ranks[-1] - unique_ranks[0] if un > 0 else 0
             if is_connector and span == un - 1: score += 4.0 * un
             elif gaps == 1 and span <= 4: score += 2.0 * un
-            # Syntax fix preserved (semicolons allow this, but separate lines are often preferred)
             if set(unique_ranks).issuperset({0, 1, 2}): score += 3.0;
             if set(unique_ranks).issuperset({0, 1, 2, 3}): score += 5.0;
             if set(unique_ranks).issuperset({9, 10, 11, 12}): score += 4.0;
@@ -1190,4 +1248,3 @@ class CFRAgent:
         return avg_abs_regret < self.stop_threshold
 
 # --- Конец файла ai_engine.py ---
-# PRESERVED FIX: RandomAgent class is NOT present in this merged file.
