@@ -1,4 +1,4 @@
-# ai_engine.py (Merged Version with Action Generation Fix v2 + DEBUG LOGGING)
+# ai_engine.py (Merged Version with Action Generation Fix v3 + DEBUG LOGGING)
 
 # --- Стандартные импорты ---
 import itertools
@@ -468,12 +468,12 @@ def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bo
 # --- Функции генерации действий ---
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# START OF REVISED _generate_placements_recursive FUNCTION (v2 + DEBUG LOGGING)
+# START OF CORRECTED _generate_placements_recursive FUNCTION (v3)
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 def _generate_placements_recursive(
     cards_to_place: List[Card],
     current_board_jax: jnp.ndarray, # Shape (13, 2)
-    ai_settings: Dict, # Keep ai_settings for potential future use, though not used now
+    ai_settings: Dict,
     card_idx: int,
     valid_placements: List[jnp.ndarray],
     max_placements: Optional[int] = 1000
@@ -482,25 +482,18 @@ def _generate_placements_recursive(
     Recursively explores placements for cards_to_place onto current_board_jax.
     Appends ALL physically possible final placements (shape (13, 2)) to valid_placements list.
     Dead hand check is REMOVED from this function.
+    Corrected branching logic.
     """
-    # DEBUG: Log entry
-    # logger.debug(f"Recurse Entry: card_idx={card_idx}, current_card={cards_to_place[card_idx] if card_idx < len(cards_to_place) else 'None'}")
-    # logger.debug(f"Current Board:\n{current_board_jax}")
-
-
-    # Check limit at the beginning of the call
+    # Check limit at the beginning
     if max_placements is not None and len(valid_placements) >= max_placements:
         logger.debug(f"DEBUG: Placement limit ({max_placements}) hit during recursion.")
-        return True # Signal limit reached
+        return True
 
-    # Base Case: All cards for this step have been placed
+    # Base Case: All cards placed
     if card_idx == len(cards_to_place):
         logger.debug(f"DEBUG: Base case reached (card_idx={card_idx}). Adding placement.")
-        # logger.debug(f"Placement to add:\n{current_board_jax}")
-        # Append the completed placement WITHOUT checking for dead hand here
         valid_placements.append(current_board_jax)
-
-        # Check limit again after adding a placement
+        # Check limit again after adding
         if max_placements is not None and len(valid_placements) >= max_placements:
             logger.debug(f"DEBUG: Placement limit ({max_placements}) hit after adding in base case.")
             return True
@@ -511,52 +504,54 @@ def _generate_placements_recursive(
     card_arr = card_to_array(card)
     limit_reached = False
 
-    # Try placing in Top line
+    # --- Explore placing card `card_idx` in EACH available slot ---
+
+    # 1. Try placing in available Top slots
     top_indices = jnp.arange(3)
     top_occupied = jnp.any(current_board_jax[top_indices] != -1, axis=1)
-    first_free_top_candidates = jnp.where(~top_occupied, top_indices, 3)
-    if first_free_top_candidates.size > 0 and first_free_top_candidates[0] < 3:
-        first_free_top = first_free_top_candidates[0]
-        next_placement_top = current_board_jax.at[first_free_top].set(card_arr)
-        # logger.debug(f"DEBUG: Recursing for card {card_idx+1} into TOP (index {first_free_top})")
+    free_top_indices = top_indices[~top_occupied]
+    for free_idx in free_top_indices:
+        # Create the board state with card_idx placed at this specific free_idx
+        next_board_state = current_board_jax.at[free_idx].set(card_arr)
+        # Recurse for the *next* card (card_idx + 1) using this new board state
+        # logger.debug(f"DEBUG: Recursing for card {card_idx+1} after placing card {card_idx} in TOP (index {free_idx})")
         limit_reached = _generate_placements_recursive(
-            cards_to_place, next_placement_top, ai_settings, card_idx + 1, valid_placements, max_placements
+            cards_to_place, next_board_state, ai_settings, card_idx + 1, valid_placements, max_placements
         )
-        if limit_reached: return True
+        if limit_reached: return True # Propagate limit signal immediately
 
-    # Try placing in Middle line
+    # 2. Try placing in available Middle slots
     mid_indices = jnp.arange(3, 8)
     mid_occupied = jnp.any(current_board_jax[mid_indices] != -1, axis=1)
-    first_free_mid_candidates = jnp.where(~mid_occupied, mid_indices, 8)
-    if first_free_mid_candidates.size > 0 and first_free_mid_candidates[0] < 8:
-        first_free_mid = first_free_mid_candidates[0]
-        next_placement_mid = current_board_jax.at[first_free_mid].set(card_arr)
-        # logger.debug(f"DEBUG: Recursing for card {card_idx+1} into MIDDLE (index {first_free_mid})")
+    free_mid_indices = mid_indices[~mid_occupied]
+    for free_idx in free_mid_indices:
+        next_board_state = current_board_jax.at[free_idx].set(card_arr)
+        # logger.debug(f"DEBUG: Recursing for card {card_idx+1} after placing card {card_idx} in MIDDLE (index {free_idx})")
         limit_reached = _generate_placements_recursive(
-            cards_to_place, next_placement_mid, ai_settings, card_idx + 1, valid_placements, max_placements
+            cards_to_place, next_board_state, ai_settings, card_idx + 1, valid_placements, max_placements
         )
         if limit_reached: return True
 
-    # Try placing in Bottom line
+    # 3. Try placing in available Bottom slots
     bot_indices = jnp.arange(8, 13)
     bot_occupied = jnp.any(current_board_jax[bot_indices] != -1, axis=1)
-    first_free_bot_candidates = jnp.where(~bot_occupied, bot_indices, 13)
-    if first_free_bot_candidates.size > 0 and first_free_bot_candidates[0] < 13:
-        first_free_bot = first_free_bot_candidates[0]
-        next_placement_bot = current_board_jax.at[first_free_bot].set(card_arr)
-        # logger.debug(f"DEBUG: Recursing for card {card_idx+1} into BOTTOM (index {first_free_bot})")
+    free_bot_indices = bot_indices[~bot_occupied]
+    for free_idx in free_bot_indices:
+        next_board_state = current_board_jax.at[free_idx].set(card_arr)
+        # logger.debug(f"DEBUG: Recursing for card {card_idx+1} after placing card {card_idx} in BOTTOM (index {free_idx})")
         limit_reached = _generate_placements_recursive(
-            cards_to_place, next_placement_bot, ai_settings, card_idx + 1, valid_placements, max_placements
+            cards_to_place, next_board_state, ai_settings, card_idx + 1, valid_placements, max_placements
         )
         if limit_reached: return True
 
     # logger.debug(f"DEBUG: Finished exploring branches for card_idx={card_idx}")
-    return False # Finished exploring branches for this card_idx, limit not hit in this path
+    return False # Finished exploring all slots for this card_idx, limit not hit in this path
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-# END OF REVISED _generate_placements_recursive FUNCTION (v2 + DEBUG LOGGING)
+# END OF CORRECTED _generate_placements_recursive FUNCTION (v3)
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
+# --- get_actions function (Filters dead hands *after* recursion) ---
 def get_actions(game_state: GameState) -> jnp.ndarray:
     logger.debug(f"DEBUG: get_actions - ENTER | Player: {game_state.current_player} | Street: {game_state.get_street()}") # Changed level
     if game_state.is_terminal(): logger.debug("DEBUG: get_actions - Board is full, returning empty."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
@@ -619,11 +614,13 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
         # Filter generated placements for dead hands *after* recursion
         logger.debug(f"DEBUG: Filtering {len(potential_placements_for_combo)} potential placements for dead hands...") # Added log
         filter_loop_count = 0
+        valid_placements_count_this_combo = 0 # Count valid placements for this combo
         for placement_13 in potential_placements_for_combo:
             filter_loop_count += 1
             # logger.debug(f"DEBUG: Checking potential placement {filter_loop_count}:\n{placement_13}") # Very verbose, uncomment if needed
 
             # Check if this placement represents a full board state
+            # (Only full boards can be dead according to OFC rules)
             placed_count = jnp.sum(jnp.any(placement_13 != -1, axis=1))
             is_potentially_full = (placed_count == 13)
 
@@ -644,11 +641,13 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
                 action_17 = jnp.concatenate((placement_13, discard_jax), axis=0)
                 possible_actions_list.append(action_17)
                 action_count_this_hand += 1
+                valid_placements_count_this_combo += 1 # Increment valid count
                 if action_count_this_hand >= max_actions_per_hand: break # Check inner loop limit too
             # else:
                 # logger.debug(f"DEBUG: Placement {filter_loop_count} is INVALID (dead). Discarding.") # Added log
         # End of filtering loop
-        logger.debug(f"DEBUG: Finished filtering for combo {combo_counter}. Added {len(possible_actions_list) - (action_count_this_hand - filter_loop_count)} actions this combo.") # Rough count
+        logger.debug(f"DEBUG: Finished filtering for combo {combo_counter}. Added {valid_placements_count_this_combo} valid actions this combo.") # Corrected log
+
 
     logger.debug(f"DEBUG: get_actions - Finished combinations loop. Total valid actions generated: {len(possible_actions_list)}") # Changed level
     if not possible_actions_list: logger.warning(f"No valid actions generated for Player {game_state.current_player}!"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
