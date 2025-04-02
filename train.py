@@ -30,7 +30,7 @@ def main():
 
     # 2. Настройки AI (общие)
     ai_settings = {
-        'fantasyType': 'normal',
+        'fantasyType': 'standard',
         'aiType': 'mccfr',
         'training_mode': True,
         # 'normal_placement_limit': 500,
