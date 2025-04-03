@@ -1,9 +1,10 @@
-# ai_engine_v2_refactored.py
-# Версия после применения Шагов 1-4:
+# ai_engine_v3_jit_fixed.py
+# Версия после исправления ошибок JIT (TracerBoolConversionError).
 # 1. Исправлен информационный сет (убрана рука).
 # 2. Переписан генератор действий для Улиц 2-5/Фантазии с проверкой правил.
 # 3. Исправлена логика Фантазии (Standard тип, 14 карт при повторе).
 # 4. Заменены вызовы _is_dead_hand_py на is_dead_hand_jax в основной логике.
+# 5. Исправлены все JIT-функции для использования jax.lax.cond/switch/jnp.where вместо Python if/else.
 
 # --- Стандартные импорты ---
 import itertools
@@ -12,25 +13,22 @@ from threading import Event, Thread
 import time
 import math
 import logging
-from typing import List, Dict, Tuple, Optional, Union, Any # Добавлен Any
-import concurrent.futures # Для параллелизма
-import os # Для определения количества CPU
+from typing import List, Dict, Tuple, Optional, Union, Any
+import concurrent.futures
+import os
 
 # --- Импорты библиотек машинного обучения и вычислений ---
 import jax.numpy as jnp
 import jax
 from jax import random
-from jax import jit
-import numpy as np # Используем numpy для некоторых операций, не требующих JIT
+from jax import jit, lax # Импортируем lax для cond/switch
+import numpy as np
 
 # --- Импорт утилит для GitHub (с обработкой отсутствия) ---
 try:
-    # Используем относительный импорт, если github_utils в том же пакете
-    # или убедимся, что он доступен в PYTHONPATH
     from github_utils import save_ai_progress_to_github, load_ai_progress_from_github
 except ImportError:
     logging.warning("github_utils not found. Saving/Loading progress to GitHub will be disabled.")
-    # Определяем заглушки, если модуль не найден
     def save_ai_progress_to_github(*args: Any, **kwargs: Any) -> bool:
         logging.error("Saving to GitHub is disabled (github_utils not found).")
         return False
@@ -43,18 +41,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # --- Класс Card ---
+# (Без изменений)
 class Card:
-    """Представляет игральную карту с рангом и мастью."""
     RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
     SUITS = ["♥", "♦", "♣", "♠"]
     RANK_MAP = {rank: i for i, rank in enumerate(RANKS)}
     SUIT_MAP = {suit: i for i, suit in enumerate(SUITS)}
-
     def __init__(self, rank: str, suit: str):
         if rank not in self.RANKS: raise ValueError(f"Invalid rank: {rank}")
         if suit not in self.SUITS: raise ValueError(f"Invalid suit: {suit}")
-        self.rank = rank
-        self.suit = suit
+        self.rank = rank; self.suit = suit
     def __repr__(self) -> str: return f"{self.rank}{self.suit}"
     def __eq__(self, other: object) -> bool:
         if isinstance(other, dict): return self.rank == other.get("rank") and self.suit == other.get("suit")
@@ -67,11 +63,9 @@ class Card:
     def get_all_cards() -> List["Card"]: return [Card(r, s) for r in Card.RANKS for s in Card.SUITS]
 
 # --- Класс Hand ---
+# (Без изменений)
 class Hand:
-    """Представляет руку игрока."""
-    def __init__(self, cards: Optional[List[Card]] = None):
-        # Убрана обработка jnp.ndarray, т.к. инициализация должна быть списком Card
-        self.cards = cards if cards is not None else []
+    def __init__(self, cards: Optional[List[Card]] = None): self.cards = cards if cards is not None else []
     def add_card(self, card: Card) -> None:
         if not isinstance(card, Card): raise TypeError("card must be an instance of Card")
         self.cards.append(card)
@@ -99,8 +93,8 @@ class Hand:
          return jnp.array([card_to_array(card) for card in self.cards], dtype=jnp.int32)
 
 # --- Класс Board ---
+# (Без изменений)
 class Board:
-    """Представляет доску игрока с тремя линиями."""
     def __init__(self): self.top: List[Card] = []; self.middle: List[Card] = []; self.bottom: List[Card] = []
     def get_placed_count(self) -> int: return len(self.top) + len(self.middle) + len(self.bottom)
     def place_card(self, line: str, card: Card) -> None:
@@ -125,7 +119,6 @@ class Board:
         if not cards: return jnp.empty((0, 2), dtype=jnp.int32)
         return jnp.array([card_to_array(card) for card in cards], dtype=jnp.int32)
     def to_jax_placement(self) -> jnp.ndarray:
-        """Converts the current board state to a JAX array (13x2)."""
         placement = jnp.full((13, 2), -1, dtype=jnp.int32); idx = 0
         for card in self.top:
              if idx < 3: placement = placement.at[idx].set(card_to_array(card)); idx += 1
@@ -138,16 +131,15 @@ class Board:
         return placement
     @staticmethod
     def from_py_placement(placement_list: List[Optional[Card]]) -> "Board":
-        """Creates a Board object from a Python list representation (len 13)."""
         board = Board()
-        if len(placement_list) != 13:
-            raise ValueError("Placement list must have length 13")
+        if len(placement_list) != 13: raise ValueError("Placement list must have length 13")
         board.top = [c for c in placement_list[0:3] if c is not None]
         board.middle = [c for c in placement_list[3:8] if c is not None]
         board.bottom = [c for c in placement_list[8:13] if c is not None]
         return board
 
 # --- Вспомогательные функции для преобразования Card <-> JAX array ---
+# (Без изменений)
 def card_to_array(card: Optional[Card]) -> jnp.ndarray:
     if card is None: return jnp.array([-1, -1], dtype=jnp.int32)
     return jnp.array([Card.RANK_MAP.get(card.rank, -1), Card.SUIT_MAP.get(card.suit, -1)], dtype=jnp.int32)
@@ -163,7 +155,7 @@ def action_to_jax(action_dict: Dict[str, List[Card]]) -> jnp.ndarray:
     action_array = jnp.full((17, 2), -1, dtype=jnp.int32); idx = 0
     for card in action_dict.get("top", []):
         if idx < 3: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
-    idx = 3
+    idx = 3; # ... (остальные циклы без изменений) ...
     for card in action_dict.get("middle", []):
         if idx < 8: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
     idx = 8
@@ -175,8 +167,7 @@ def action_to_jax(action_dict: Dict[str, List[Card]]) -> jnp.ndarray:
     return action_array
 def action_from_array(action_array: jnp.ndarray) -> Dict[str, List[Card]]:
     if action_array is None or action_array.shape != (17, 2):
-        logger.error(f"Invalid shape for action_array: {action_array.shape if action_array is not None else 'None'}")
-        return {}
+        logger.error(f"Invalid shape for action_array: {action_array.shape if action_array is not None else 'None'}"); return {}
     action_dict = {"top": [], "middle": [], "bottom": [], "discarded": []}
     action_dict["top"] = [card for i in range(3) if (card := array_to_card(action_array[i])) is not None]
     action_dict["middle"] = [card for i in range(3, 8) if (card := array_to_card(action_array[i])) is not None]
@@ -184,15 +175,14 @@ def action_from_array(action_array: jnp.ndarray) -> Dict[str, List[Card]]:
     action_dict["discarded"] = [card for i in range(13, 17) if (card := array_to_card(action_array[i])) is not None]
     return {k: v for k, v in action_dict.items() if v}
 def placement_py_to_jax(placement_list: List[Optional[Card]]) -> jnp.ndarray:
-    """Converts a Python list placement (len 13) to a JAX array."""
     if len(placement_list) != 13:
         logger.warning(f"Incorrect length for placement_list: {len(placement_list)}. Adjusting to 13.")
         placement_list = (placement_list + [None]*13)[:13]
     return jnp.array([card_to_array(c) for c in placement_list], dtype=jnp.int32)
 
 # --- Класс GameState ---
+# (Изменения в get_information_set, get_payoff, is_valid_fantasy_entry, is_valid_fantasy_repeat, get_fantasy_cards_count)
 class GameState:
-    """Представляет полное состояние игры для одного игрока в определенный момент."""
     def __init__(
         self, selected_cards: Optional[Union[List[Card], Hand]] = None, board: Optional[Board] = None,
         discarded_cards: Optional[List[Card]] = None, ai_settings: Optional[Dict] = None,
@@ -212,13 +202,12 @@ class GameState:
     def is_terminal(self) -> bool: return self.board.is_full()
     def get_street(self) -> int:
         placed = self.board.get_placed_count()
-        if placed == 0: return 1
+        if placed == 0: return 1; # ... (остальная логика без изменений) ...
         if placed == 5: return 2
         if placed == 7: return 3
         if placed == 9: return 4
         if placed == 11: return 5
-        if placed == 13: return 6 # Board is full
-        # Handle intermediate states
+        if placed == 13: return 6
         if placed < 5: return 1
         if placed < 7: return 2
         if placed < 9: return 3
@@ -226,338 +215,415 @@ class GameState:
         if placed < 13: return 5
         logger.warning(f"Unexpected placed cards ({placed}) for street calc."); return 0
     def apply_action(self, action: Dict[str, List[Card]]) -> "GameState":
-        new_board = Board()
-        new_board.top = self.board.top[:]
-        new_board.middle = self.board.middle[:]
-        new_board.bottom = self.board.bottom[:]
-        new_discarded = self.discarded_cards[:]
-        placed_in_action = []
-        discarded_in_action = action.get("discarded", [])
-
+        # (Без изменений)
+        new_board = Board(); new_board.top = self.board.top[:]; new_board.middle = self.board.middle[:]; new_board.bottom = self.board.bottom[:]
+        new_discarded = self.discarded_cards[:]; placed_in_action = []; discarded_in_action = action.get("discarded", [])
         for line in ["top", "middle", "bottom"]:
-            cards_to_place = action.get(line, [])
-            placed_in_action.extend(cards_to_place)
+            cards_to_place = action.get(line, []); placed_in_action.extend(cards_to_place)
             for card in cards_to_place:
                 try: new_board.place_card(line, card)
-                except ValueError as e:
-                    logger.error(f"Error applying action: {e}. Action: {action}, Board state:\n{self.board}")
-                    raise ValueError(f"Invalid action application: {e}") from e
-
-        new_discarded.extend(discarded_in_action)
-        played_cards = placed_in_action + discarded_in_action
-        new_hand = Hand(self.selected_cards.cards[:])
-        new_hand.remove_cards(played_cards)
-
-        new_state = GameState(
-            selected_cards=new_hand, board=new_board, discarded_cards=new_discarded,
-            ai_settings=self.ai_settings.copy(), deck=self.deck, current_player=self.current_player,
-            opponent_board=self.opponent_board, opponent_discarded=self.opponent_discarded
-        )
+                except ValueError as e: logger.error(f"Error applying action: {e}. Action: {action}, Board state:\n{self.board}"); raise ValueError(f"Invalid action application: {e}") from e
+        new_discarded.extend(discarded_in_action); played_cards = placed_in_action + discarded_in_action
+        new_hand = Hand(self.selected_cards.cards[:]); new_hand.remove_cards(played_cards)
+        new_state = GameState(selected_cards=new_hand, board=new_board, discarded_cards=new_discarded, ai_settings=self.ai_settings.copy(), deck=self.deck, current_player=self.current_player, opponent_board=self.opponent_board, opponent_discarded=self.opponent_discarded)
         return new_state
 
-    # [ИЗМЕНЕНИЕ ШАГ 1]
+    # [ИЗМЕНЕНИЕ ШАГ 1] - OK
     def get_information_set(self) -> str:
-        """
-        Возвращает строку, представляющую информационный сет игрока.
-        НЕ включает карты на руке игрока.
-        """
         st = lambda cards: ",".join(map(str, sorted(cards, key=lambda c: (Card.RANK_MAP.get(c.rank, -1), Card.SUIT_MAP.get(c.suit, -1)))))
         street = f"St:{self.get_street()}"
         my_board = f"T:{st(self.board.top)}|M:{st(self.board.middle)}|B:{st(self.board.bottom)}"
         my_disc = f"D:{st(self.discarded_cards)}"
         opp_board = f"OT:{st(self.opponent_board.top)}|OM:{st(self.opponent_board.middle)}|OB:{st(self.opponent_board.bottom)}"
         opp_disc = f"OD:{st(self.opponent_discarded)}"
-        # Карты на руке (self.selected_cards) НЕ включаются в инфосет!
         return f"{street}|{my_board}|{my_disc}|{opp_board}|{opp_disc}"
 
     def _calculate_pairwise_score(self, opponent_board: Board) -> int:
+        # (Без изменений)
         line_score = 0
-        if not self.board.is_full() or not opponent_board.is_full():
-             logger.warning("Pairwise score calculated on non-full boards.")
-             return 0
-        # Используем _compare_hands_py, который внутри вызывает compare_hands_jax
-        cmp_b = _compare_hands_py(self.board.bottom, opponent_board.bottom)
-        cmp_m = _compare_hands_py(self.board.middle, opponent_board.middle)
-        cmp_t = _compare_hands_py(self.board.top, opponent_board.top)
-        line_score += (1 if cmp_b > 0 else -1 if cmp_b < 0 else 0)
-        line_score += (1 if cmp_m > 0 else -1 if cmp_m < 0 else 0)
-        line_score += (1 if cmp_t > 0 else -1 if cmp_t < 0 else 0)
+        if not self.board.is_full() or not opponent_board.is_full(): logger.warning("Pairwise score calculated on non-full boards."); return 0
+        cmp_b = _compare_hands_py(self.board.bottom, opponent_board.bottom); cmp_m = _compare_hands_py(self.board.middle, opponent_board.middle); cmp_t = _compare_hands_py(self.board.top, opponent_board.top)
+        line_score += (1 if cmp_b > 0 else -1 if cmp_b < 0 else 0); line_score += (1 if cmp_m > 0 else -1 if cmp_m < 0 else 0); line_score += (1 if cmp_t > 0 else -1 if cmp_t < 0 else 0)
         scoop = 0
         if cmp_b > 0 and cmp_m > 0 and cmp_t > 0: scoop = 3
         elif cmp_b < 0 and cmp_m < 0 and cmp_t < 0: scoop = -3
         return line_score + scoop
 
-    # [ИЗМЕНЕНИЕ ШАГ 4]
+    # [ИЗМЕНЕНИЕ ШАГ 4] - OK
     def get_payoff(self) -> int:
-        if not self.is_terminal() or not self.opponent_board.is_full():
-            logger.warning("get_payoff called on non-terminal state(s).")
-            return 0
-
-        my_place_jax = self.board.to_jax_placement()
-        opp_place_jax = self.opponent_board.to_jax_placement()
-
-        # Используем JAX-версию для проверки мертвой руки
-        i_am_dead = is_dead_hand_jax(my_place_jax)
-        opp_is_dead = is_dead_hand_jax(opp_place_jax)
-
-        my_royalty = 0
-        opp_royalty = 0
-
-        if not i_am_dead:
-            my_royalty = int(jnp.sum(calculate_royalties_jax(my_place_jax, self.ai_settings)))
-        if not opp_is_dead:
-            opp_royalty = int(jnp.sum(calculate_royalties_jax(opp_place_jax, self.ai_settings)))
-
+        if not self.is_terminal() or not self.opponent_board.is_full(): logger.warning("get_payoff called on non-terminal state(s)."); return 0
+        my_place_jax = self.board.to_jax_placement(); opp_place_jax = self.opponent_board.to_jax_placement()
+        i_am_dead = is_dead_hand_jax(my_place_jax); opp_is_dead = is_dead_hand_jax(opp_place_jax)
+        my_royalty = 0; opp_royalty = 0
+        # Используем where для условного вычисления роялти (более JAX-идиоматично)
+        my_royalty = jnp.where(i_am_dead, 0, jnp.sum(calculate_royalties_jax(my_place_jax, self.ai_settings)))
+        opp_royalty = jnp.where(opp_is_dead, 0, jnp.sum(calculate_royalties_jax(opp_place_jax, self.ai_settings)))
+        # Конвертируем в int после вычислений
+        my_royalty = int(my_royalty); opp_royalty = int(opp_royalty)
         if i_am_dead and opp_is_dead: return 0
         if i_am_dead: return -6 - opp_royalty
         if opp_is_dead: return 6 + my_royalty
-
         pairwise_score = self._calculate_pairwise_score(self.opponent_board)
         return pairwise_score + my_royalty - opp_royalty
 
-    # [ИЗМЕНЕНИЕ ШАГ 4]
+    # [ИЗМЕНЕНИЕ ШАГ 4] - OK
     def is_valid_fantasy_entry(self) -> bool:
-        if not self.board.is_full(): return False
-        place_jax = self.board.to_jax_placement()
-        # Используем JAX-версию для проверки мертвой руки
-        if is_dead_hand_jax(place_jax):
-             return False
-        # Проверка входа в Фантазию
-        return is_valid_fantasy_entry_jax(place_jax, self.ai_settings)
+        # Используем cond для JAX-совместимого условного выполнения
+        def true_fn(): return False # Если не полная
+        def false_fn():
+            place_jax = self.board.to_jax_placement()
+            # Вложенный cond для проверки мертвой руки
+            return lax.cond(is_dead_hand_jax(place_jax),
+                            lambda: False, # Если мертвая
+                            lambda: is_valid_fantasy_entry_jax(place_jax, self.ai_settings)) # Если не мертвая
+        return lax.cond(jnp.logical_not(self.board.is_full()), true_fn, false_fn)
 
-    # [ИЗМЕНЕНИЕ ШАГ 4]
+    # [ИЗМЕНЕНИЕ ШАГ 4] - OK
     def is_valid_fantasy_repeat(self) -> bool:
-        if not self.board.is_full(): return False
-        place_jax = self.board.to_jax_placement()
-        # Используем JAX-версию для проверки мертвой руки
-        if is_dead_hand_jax(place_jax):
-             return False
-        # Проверка повтора Фантазии
-        return is_valid_fantasy_repeat_jax(place_jax, self.ai_settings)
+        # Используем cond для JAX-совместимого условного выполнения
+        def true_fn(): return False # Если не полная
+        def false_fn():
+            place_jax = self.board.to_jax_placement()
+            # Вложенный cond для проверки мертвой руки
+            return lax.cond(is_dead_hand_jax(place_jax),
+                            lambda: False, # Если мертвая
+                            lambda: is_valid_fantasy_repeat_jax(place_jax, self.ai_settings)) # Если не мертвая
+        return lax.cond(jnp.logical_not(self.board.is_full()), true_fn, false_fn)
 
-    # [ИЗМЕНЕНИЕ ШАГ 3 и 4]
+    # [ИЗМЕНЕНИЕ ШАГ 3 и 4] - OK
     def get_fantasy_cards_count(self) -> int:
-        """Определяет количество карт для ВХОДА в Фантазию (Standard)."""
-        if not self.board.is_full(): return 0
+        # Используем cond для JAX-совместимого условного выполнения
+        def compute_count():
+            place_jax = self.board.to_jax_placement()
+            # Вложенный cond для мертвой руки
+            return lax.cond(is_dead_hand_jax(place_jax),
+                            lambda: 0, # Если мертвая
+                            lambda: self._get_fantasy_cards_count_jax_logic(place_jax)) # Если не мертвая
+        # Основной cond: проверяем, полная ли доска
+        return lax.cond(jnp.logical_not(self.board.is_full()), lambda: 0, compute_count)
 
-        place_jax = self.board.to_jax_placement()
-        # Используем JAX-версию для проверки мертвой руки
-        if is_dead_hand_jax(place_jax):
-             return 0
-
+    # Вспомогательная функция для логики подсчета (чтобы не загромождать cond)
+    def _get_fantasy_cards_count_jax_logic(self, place_jax: jnp.ndarray) -> int:
         top_cards_jax = place_jax[0:3]
         is_top_full = jnp.sum(jnp.any(top_cards_jax != -1, axis=1)) == 3
-        if not is_top_full: return 0
+        # Используем cond для проверки полноты топа
+        return lax.cond(jnp.logical_not(is_top_full),
+                        lambda: 0, # Если топ не полный
+                        lambda: self._get_fantasy_cards_count_standard(top_cards_jax)) # Если топ полный
 
+    # Логика для Standard Fantasy
+    def _get_fantasy_cards_count_standard(self, top_cards_jax: jnp.ndarray) -> int:
         top_rank, _ = evaluate_hand_jax(top_cards_jax)
-
-        # --- Логика для Standard Фантазии ---
+        # Используем cond для проверки типа фантазии (хотя сейчас только standard)
         fantasy_type = self.ai_settings.get('fantasyType', 'standard')
+        def standard_logic():
+            is_qualifying_pair = lax.cond(top_rank == 8, # Если пара
+                                          lambda: jnp.argmax(_get_rank_counts_jax(top_cards_jax) == 2) >= Card.RANK_MAP['Q'],
+                                          lambda: False)
+            is_trips = (top_rank == 6)
+            return jnp.where(is_qualifying_pair | is_trips, 14, 0)
 
+        def unsupported_logic():
+             logger.warning(f"Unsupported fantasyType '{fantasy_type}' in get_fantasy_cards_count. Defaulting to 0 cards.")
+             return 0
+
+        # Сравниваем строки, т.к. fantasy_type - строка Python
+        # Это не будет работать внутри JIT!
+        # get_fantasy_cards_count не должна быть @jit, т.к. читает ai_settings (словарь Python)
+        # Убираем @jit с этой функции и ее помощников, если он там был.
+        # Возвращаемся к обычному if, т.к. функция выполняется в Python.
         if fantasy_type == 'standard':
             is_qualifying_pair = False
             if top_rank == 8: # Пара
                 rank_counts = _get_rank_counts_jax(top_cards_jax)
                 pair_rank_idx = jnp.argmax(rank_counts == 2)
                 is_qualifying_pair = pair_rank_idx >= Card.RANK_MAP['Q'] # QQ+
-
             is_trips = (top_rank == 6) # Сет
-
-            if is_qualifying_pair or is_trips:
-                return 14 # Standard Fantasy всегда дает 14 карт при входе
-            else:
-                return 0
-        # --- Убрана логика для Progressive, т.к. выбран Standard ---
-        # elif fantasy_type == 'progressive':
-        #    ... (старый код) ...
+            if is_qualifying_pair or is_trips: return 14
+            else: return 0
         else:
             logger.warning(f"Unsupported fantasyType '{fantasy_type}' in get_fantasy_cards_count. Defaulting to 0 cards.")
             return 0
 
+
 # --- Вспомогательные JAX функции (оценка рук, роялти, фантазия) ---
-# (Без изменений, предполагаем их корректность)
+# [ИЗМЕНЕНИЕ ШАГ 5] - Применяем JAX control flow ко всем JIT функциям
+
 @jit
 def _safe_get_counts(values: jnp.ndarray, length: int) -> jnp.ndarray:
     valid_mask = (values >= 0) & (values < length)
     valid_values = values[valid_mask]
-    if valid_values.shape[0] == 0: return jnp.zeros(length, dtype=jnp.int32)
-    return jnp.bincount(valid_values, length=length)
+    # Используем cond вместо if
+    return lax.cond(valid_values.shape[0] == 0,
+                    lambda: jnp.zeros(length, dtype=jnp.int32),
+                    lambda: jnp.bincount(valid_values, length=length))
+
 @jit
 def _get_rank_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray:
-    if cards_jax.shape[0] == 0: return jnp.zeros(13, dtype=jnp.int32)
-    ranks = cards_jax[:, 0]; return _safe_get_counts(ranks, 13)
+    # Используем cond вместо if
+    return lax.cond(cards_jax.shape[0] == 0,
+                    lambda: jnp.zeros(13, dtype=jnp.int32),
+                    lambda: _safe_get_counts(cards_jax[:, 0], 13))
+
 @jit
 def _get_suit_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray:
-    if cards_jax.shape[0] == 0: return jnp.zeros(4, dtype=jnp.int32)
-    suits = cards_jax[:, 1]; return _safe_get_counts(suits, 4)
+    # Используем cond вместо if
+    return lax.cond(cards_jax.shape[0] == 0,
+                    lambda: jnp.zeros(4, dtype=jnp.int32),
+                    lambda: _safe_get_counts(cards_jax[:, 1], 4))
+
 @jit
 def _is_flush_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
     suits = cards_jax[:, 1]; valid_mask = suits != -1
-    if jnp.sum(valid_mask) != 5: return False
+    # Используем cond вместо if
+    all_valid = jnp.sum(valid_mask) == 5
     first_suit = suits[0]; all_same_suit = jnp.all(suits == first_suit)
-    return is_five_cards & all_same_suit
+    # Результат = is_five_cards & all_valid & all_same_suit
+    return is_five_cards & all_valid & all_same_suit
+
 @jit
 def _is_straight_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
     ranks = cards_jax[:, 0]; valid_mask = ranks != -1
-    if jnp.sum(valid_mask) != 5: return False
-    unique_ranks = jnp.unique(ranks); is_five_unique_ranks = unique_ranks.shape[0] == 5
-    sorted_ranks = jnp.sort(unique_ranks)
-    is_a5 = jnp.array_equal(sorted_ranks, jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
-    is_normal = (sorted_ranks[4] - sorted_ranks[0]) == 4
-    return is_five_cards & is_five_unique_ranks & (is_a5 | is_normal)
+    # Используем cond вместо if
+    all_valid = jnp.sum(valid_mask) == 5
+    def check_straight():
+        # Логика для случая, когда 5 валидных карт
+        unique_ranks = jnp.unique(ranks); is_five_unique_ranks = unique_ranks.shape[0] == 5
+        sorted_ranks = jnp.sort(unique_ranks)
+        is_a5 = jnp.array_equal(sorted_ranks, jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
+        is_normal = (sorted_ranks[4] - sorted_ranks[0]) == 4
+        return is_five_unique_ranks & (is_a5 | is_normal)
+    # Результат = is_five_cards & all_valid & (результат check_straight если all_valid)
+    return is_five_cards & all_valid & lax.cond(all_valid, check_straight, lambda: False)
+
+
 @jit
 def _is_straight_flush_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
+    # Логика не меняется, т.к. использует JAX-операции
     return is_five_cards & _is_flush_jax(cards_jax) & _is_straight_jax(cards_jax)
+
 @jit
 def _is_royal_flush_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
-    if not (is_five_cards & _is_straight_flush_jax(cards_jax)): return False
-    ranks = cards_jax[:, 0]; has_ace = jnp.any(ranks == 12)
-    return has_ace
+    # Используем булеву логику вместо if not
+    is_sf = _is_straight_flush_jax(cards_jax)
+    has_ace = jnp.any(cards_jax[:, 0] == 12)
+    return is_five_cards & is_sf & has_ace
+
 @jit
 def _is_four_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
+    # Логика не меняется
     rank_counts = _get_rank_counts_jax(cards_jax); has_four = jnp.any(rank_counts == 4)
     return is_five_cards & has_four
+
 @jit
 def _is_full_house_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
+    # Логика не меняется
     rank_counts = _get_rank_counts_jax(cards_jax); has_three = jnp.any(rank_counts == 3); has_pair = jnp.any(rank_counts == 2)
     return is_five_cards & has_three & has_pair
+
 @jit
 def _is_three_of_a_kind_jax(cards_jax: jnp.ndarray) -> bool:
-    n = cards_jax.shape[0]; is_valid_size = (n == 5) | (n == 3)
-    if not is_valid_size: return False
-    rank_counts = _get_rank_counts_jax(cards_jax); has_three = jnp.sum(rank_counts == 3) == 1
-    has_no_pair = jnp.sum(rank_counts == 2) == 0
-    if n == 5: return has_three & has_no_pair
-    else: return has_three
+    n = cards_jax.shape[0]
+    is_valid_size = (n == 5) | (n == 3)
+    def check_3k():
+        rank_counts = _get_rank_counts_jax(cards_jax)
+        has_three = jnp.sum(rank_counts == 3) == 1
+        has_no_pair = jnp.sum(rank_counts == 2) == 0
+        # Используем cond для n==5 vs n==3
+        return lax.cond(n == 5, lambda: has_three & has_no_pair, lambda: has_three)
+    # Используем cond для is_valid_size
+    return lax.cond(is_valid_size, check_3k, lambda: False)
+
 @jit
 def _is_two_pair_jax(cards_jax: jnp.ndarray) -> bool:
     is_five_cards = cards_jax.shape[0] == 5
+    # Логика не меняется
     rank_counts = _get_rank_counts_jax(cards_jax); has_two_pairs = jnp.sum(rank_counts == 2) == 2
     return is_five_cards & has_two_pairs
+
 @jit
 def _is_one_pair_jax(cards_jax: jnp.ndarray) -> bool:
-    n = cards_jax.shape[0]; is_valid_size = (n == 5) | (n == 3) | (n == 2)
-    if not is_valid_size: return False
-    rank_counts = _get_rank_counts_jax(cards_jax); has_one_pair = jnp.sum(rank_counts == 2) == 1
-    has_no_better = jnp.sum(rank_counts >= 3) == 0 # Исправлено: counts -> rank_counts
-    return has_one_pair & has_no_better
+    n = cards_jax.shape[0]
+    is_valid_size = (n == 5) | (n == 3) | (n == 2)
+    def check_1p():
+        rank_counts = _get_rank_counts_jax(cards_jax)
+        has_one_pair = jnp.sum(rank_counts == 2) == 1
+        has_no_better = jnp.sum(rank_counts >= 3) == 0
+        return has_one_pair & has_no_better
+    # Используем cond для is_valid_size
+    return lax.cond(is_valid_size, check_1p, lambda: False)
+
 @jit
 def _identify_combination_jax(cards_jax: jnp.ndarray) -> int:
     """Identifies the best poker combination for the given JAX cards."""
     ranks = cards_jax[:, 0]; valid_mask = ranks != -1; num_valid_cards = jnp.sum(valid_mask)
-    if num_valid_cards == 0: return 10
-    valid_cards_jax = cards_jax[valid_mask]; nv = valid_cards_jax.shape[0]
-    if nv == 5:
-        if _is_royal_flush_jax(valid_cards_jax): return 0
-        if _is_straight_flush_jax(valid_cards_jax): return 1
-        if _is_four_of_a_kind_jax(valid_cards_jax): return 2
-        if _is_full_house_jax(valid_cards_jax): return 3
-        if _is_flush_jax(valid_cards_jax): return 4
-        if _is_straight_jax(valid_cards_jax): return 5
-        if _is_three_of_a_kind_jax(valid_cards_jax): return 6
-        if _is_two_pair_jax(valid_cards_jax): return 7
-        if _is_one_pair_jax(valid_cards_jax): return 8
-        return 9
-    elif nv == 3:
-        if _is_three_of_a_kind_jax(valid_cards_jax): return 6
-        if _is_one_pair_jax(valid_cards_jax): return 8
-        return 9
-    elif nv == 2:
-        if _is_one_pair_jax(valid_cards_jax): return 8
-        return 9
-    elif nv == 1: return 9
-    return 10
+
+    def get_rank(valid_cards_arg):
+        nv = valid_cards_arg.shape[0]
+        # Логика определения ранга для непустой руки
+        def rank_for_5():
+            return lax.cond(_is_royal_flush_jax(valid_cards_arg), lambda: 0,
+                   lambda: lax.cond(_is_straight_flush_jax(valid_cards_arg), lambda: 1,
+                   lambda: lax.cond(_is_four_of_a_kind_jax(valid_cards_arg), lambda: 2,
+                   lambda: lax.cond(_is_full_house_jax(valid_cards_arg), lambda: 3,
+                   lambda: lax.cond(_is_flush_jax(valid_cards_arg), lambda: 4,
+                   lambda: lax.cond(_is_straight_jax(valid_cards_arg), lambda: 5,
+                   lambda: lax.cond(_is_three_of_a_kind_jax(valid_cards_arg), lambda: 6,
+                   lambda: lax.cond(_is_two_pair_jax(valid_cards_arg), lambda: 7,
+                   lambda: lax.cond(_is_one_pair_jax(valid_cards_arg), lambda: 8,
+                   lambda: 9))))))))) # High Card
+
+        def rank_for_3():
+            return lax.cond(_is_three_of_a_kind_jax(valid_cards_arg), lambda: 6,
+                   lambda: lax.cond(_is_one_pair_jax(valid_cards_arg), lambda: 8,
+                   lambda: 9)) # High Card
+
+        def rank_for_2():
+            return lax.cond(_is_one_pair_jax(valid_cards_arg), lambda: 8, lambda: 9) # High Card
+
+        # Используем switch для выбора логики по nv
+        # Защита от nv=0 здесь не нужна, т.к. вызывается только если num_valid_cards > 0
+        branches = [lambda: 9, # nv=1 (High Card)
+                    rank_for_2, # nv=2
+                    rank_for_3, # nv=3
+                    lambda: 9, # nv=4 (High Card - не стандарт, но для полноты)
+                    rank_for_5] # nv=5
+        # Индекс для switch: nv-1 (т.к. nv >= 1)
+        safe_index = jnp.clip(nv - 1, 0, len(branches) - 1)
+        return lax.switch(safe_index, branches)
+
+    # Основной cond: пустая рука vs непустая
+    return lax.cond(num_valid_cards == 0,
+                    lambda: 10, # No Hand
+                    lambda: get_rank(cards_jax[valid_mask]))
+
+# [ИЗМЕНЕНИЕ ШАГ 5] - Исправлена evaluate_hand_jax
 @jit
 def evaluate_hand_jax(cards_jax: jnp.ndarray) -> Tuple[int, jnp.ndarray]:
     """Evaluates a hand represented by a JAX array. Returns (rank_code, kickers)."""
-    ranks = cards_jax[:, 0]; valid_mask = ranks != -1; num_valid_cards = jnp.sum(valid_mask)
+    ranks = cards_jax[:, 0]
+    valid_mask = ranks != -1
+    num_valid_cards = jnp.sum(valid_mask)
     default_kickers = jnp.full(5, -1, dtype=jnp.int32)
-    if num_valid_cards == 0: return 10, default_kickers
-    valid_cards_jax = cards_jax[valid_mask]; nv = valid_cards_jax.shape[0]; valid_ranks = valid_cards_jax[:, 0]
-    combination_rank = _identify_combination_jax(valid_cards_jax)
-    if combination_rank >= 9:
+
+    # Внутренняя функция для вычисления ранга и кикеров непустой руки
+    def compute_rank_and_kickers(valid_cards_jax_arg):
+        nv = valid_cards_jax_arg.shape[0]
+        valid_ranks = valid_cards_jax_arg[:, 0]
+        combination_rank = _identify_combination_jax(valid_cards_jax_arg)
+        rank_counts = _get_rank_counts_jax(valid_cards_jax_arg)
         sorted_ranks_desc = jnp.sort(valid_ranks)[::-1]
-        kickers = default_kickers.at[:nv].set(sorted_ranks_desc[:5])
-        return combination_rank, kickers
-    rank_counts = _get_rank_counts_jax(valid_cards_jax); sorted_ranks_desc = jnp.sort(valid_ranks)[::-1]
-    kickers = default_kickers
-    if combination_rank == 0 or combination_rank == 1:
-        is_a5 = jnp.array_equal(jnp.sort(valid_ranks), jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
-        main_kicker = jnp.where(is_a5, 3, sorted_ranks_desc[0]); kickers = kickers.at[0].set(main_kicker)
-    elif combination_rank == 2:
-        four_rank = jnp.where(rank_counts == 4)[0][0]; kicker_rank = jnp.where(rank_counts == 1)[0][0]
-        kickers = kickers.at[0].set(four_rank); kickers = kickers.at[1].set(kicker_rank)
-    elif combination_rank == 3:
-        three_rank = jnp.where(rank_counts == 3)[0][0]; pair_rank = jnp.where(rank_counts == 2)[0][0]
-        kickers = kickers.at[0].set(three_rank); kickers = kickers.at[1].set(pair_rank)
-    elif combination_rank == 4: kickers = kickers.at[:5].set(sorted_ranks_desc)
-    elif combination_rank == 5:
-        is_a5 = jnp.array_equal(jnp.sort(valid_ranks), jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
-        main_kicker = jnp.where(is_a5, 3, sorted_ranks_desc[0]); kickers = kickers.at[0].set(main_kicker)
-    elif combination_rank == 6:
-        three_rank = jnp.where(rank_counts == 3)[0][0]; other_ranks = valid_ranks[valid_ranks != three_rank]
-        sorted_others_desc = jnp.sort(other_ranks)[::-1]; kickers = kickers.at[0].set(three_rank)
-        if nv == 5: kickers = kickers.at[1:3].set(sorted_others_desc[:2])
-    elif combination_rank == 7:
-        pair_ranks = jnp.sort(jnp.where(rank_counts == 2)[0])[::-1]; kicker_rank = jnp.where(rank_counts == 1)[0][0]
-        kickers = kickers.at[0].set(pair_ranks[0]); kickers = kickers.at[1].set(pair_ranks[1]); kickers = kickers.at[2].set(kicker_rank)
-    elif combination_rank == 8:
-        pair_rank = jnp.where(rank_counts == 2)[0][0]; other_ranks = valid_ranks[valid_ranks != pair_rank]
-        sorted_others_desc = jnp.sort(other_ranks)[::-1]; kickers = kickers.at[0].set(pair_rank)
-        num_others = sorted_others_desc.shape[0]; kickers = kickers.at[1:1+num_others].set(sorted_others_desc[:4])
-    return combination_rank, kickers
+
+        # Функции для каждого случая кикеров
+        def case_0_1(): # RF, SF
+            is_a5 = jnp.array_equal(jnp.sort(valid_ranks), jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
+            main_kicker = jnp.where(is_a5, 3, sorted_ranks_desc[0]); return default_kickers.at[0].set(main_kicker)
+        def case_2(): # 4K
+            four_rank = jnp.argmax(rank_counts == 4); kicker_rank = jnp.argmax(rank_counts == 1) # Используем argmax для получения индекса
+            return default_kickers.at[0].set(four_rank).at[1].set(kicker_rank)
+        def case_3(): # FH
+            three_rank = jnp.argmax(rank_counts == 3); pair_rank = jnp.argmax(rank_counts == 2)
+            return default_kickers.at[0].set(three_rank).at[1].set(pair_rank)
+        def case_4(): return default_kickers.at[:5].set(sorted_ranks_desc) # Flush
+        def case_5(): # Straight
+            is_a5 = jnp.array_equal(jnp.sort(valid_ranks), jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
+            main_kicker = jnp.where(is_a5, 3, sorted_ranks_desc[0]); return default_kickers.at[0].set(main_kicker)
+        def case_6(): # 3K
+            three_rank = jnp.argmax(rank_counts == 3); other_ranks = valid_ranks[valid_ranks != three_rank]
+            sorted_others_desc = jnp.sort(other_ranks)[::-1]; k = default_kickers.at[0].set(three_rank)
+            k = lax.cond(nv == 5, lambda: k.at[1:3].set(sorted_others_desc[:2]), lambda: k)
+            return k
+        def case_7(): # 2P
+            pair_ranks = jnp.sort(jnp.where(rank_counts == 2)[0])[::-1]; kicker_rank = jnp.argmax(rank_counts == 1)
+            return default_kickers.at[0].set(pair_ranks[0]).at[1].set(pair_ranks[1]).at[2].set(kicker_rank)
+        def case_8(): # 1P
+            pair_rank = jnp.argmax(rank_counts == 2); other_ranks = valid_ranks[valid_ranks != pair_rank]
+            sorted_others_desc = jnp.sort(other_ranks)[::-1]; k = default_kickers.at[0].set(pair_rank)
+            num_others = sorted_others_desc.shape[0]
+            # Используем динамические срезы с jax.lax.dynamic_slice или просто обрезаем до макс. длины
+            num_kickers_to_set = jnp.minimum(num_others, 4) # Максимум 4 доп. кикера
+            # Обновляем кикеры, используя статический размер среза и маскирование или pad
+            # Проще всего обновить до 4 и положиться на -1 по умолчанию
+            k = k.at[1:1+num_kickers_to_set].set(sorted_others_desc[:num_kickers_to_set])
+            return k
+        def case_default(): # High Card (>= 9)
+             return default_kickers.at[:nv].set(sorted_ranks_desc[:5])
+
+        branches = [case_0_1, case_0_1, case_2, case_3, case_4, case_5, case_6, case_7, case_8, case_default]
+        safe_index = jnp.clip(combination_rank, 0, len(branches) - 1)
+        final_kickers = lax.switch(safe_index, branches)
+
+        return combination_rank, final_kickers
+
+    # Основной cond для обработки пустой руки
+    result_tuple = lax.cond(
+        num_valid_cards == 0,
+        lambda: (10, default_kickers),
+        lambda: compute_rank_and_kickers(cards_jax[valid_mask])
+    )
+    return result_tuple
+
+# [ИЗМЕНЕНИЕ ШАГ 5] - Исправлена compare_hands_jax
 @jit
 def compare_hands_jax(hand1_jax: jnp.ndarray, hand2_jax: jnp.ndarray) -> int:
     """Compares two hands represented by JAX arrays. Returns 1 if hand1 > hand2, -1 if hand1 < hand2, 0 if equal."""
     rank1, kickers1 = evaluate_hand_jax(hand1_jax); rank2, kickers2 = evaluate_hand_jax(hand2_jax)
-    if rank1 < rank2: return 1
-    if rank1 > rank2: return -1
-    comparison = jnp.sign(kickers1 - kickers2)
-    first_diff_index = jnp.argmax(comparison != 0)
-    result = jnp.where(jnp.any(comparison != 0), comparison[first_diff_index], 0)
-    return int(result)
+
+    # Используем cond для сравнения рангов
+    def compare_kickers():
+        comparison = jnp.sign(kickers1 - kickers2)
+        # Находим первый ненулевой элемент безопасно
+        # Создаем маску ненулевых элементов
+        mask = comparison != 0
+        # Находим индекс первого True или возвращаем 0, если все False
+        first_diff_index = jnp.argmax(mask, axis=0)
+        # Получаем значение сравнения по этому индексу, если маска не пуста, иначе 0
+        result = jnp.where(jnp.any(mask), comparison[first_diff_index], 0)
+        return result
+
+    result_final = lax.cond(rank1 < rank2, lambda: 1,
+                   lambda: lax.cond(rank1 > rank2, lambda: -1,
+                   compare_kickers)) # Если ранги равны, сравниваем кикеры
+
+    return result_final # Возвращаем JAX скаляр, конвертация в int не нужна внутри JIT
+
+# [ИЗМЕНЕНИЕ ШАГ 5] - is_dead_hand_jax уже использует where, OK
 @jit
 def is_dead_hand_jax(placement: jnp.ndarray) -> bool:
-    """Checks if a JAX placement represents a dead hand (foul). Pure JAX."""
     top_cards = placement[0:3]; middle_cards = placement[3:8]; bottom_cards = placement[8:13]
     is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
     is_middle_full = jnp.sum(jnp.any(middle_cards != -1, axis=1)) == 5
     is_bottom_full = jnp.sum(jnp.any(bottom_cards != -1, axis=1)) == 5
+    # compare_hands_jax теперь возвращает JAX скаляр
     top_beats_middle = jnp.where(is_top_full & is_middle_full, compare_hands_jax(top_cards, middle_cards) > 0, False)
     middle_beats_bottom = jnp.where(is_middle_full & is_bottom_full, compare_hands_jax(middle_cards, bottom_cards) > 0, False)
     is_dead = top_beats_middle | middle_beats_bottom
     return is_dead
 
-# --- Python versions for comparison and potentially simpler logic ---
-# _compare_hands_py используется в _is_board_valid_py и _calculate_pairwise_score
+# --- Python versions ---
+# (Без изменений, но _compare_hands_py теперь получает JAX скаляр от compare_hands_jax)
 def _compare_hands_py(hand1_cards: List[Card], hand2_cards: List[Card]) -> int:
-    """Compares two hands (lists of Card objects) using JAX internally."""
     if not hand1_cards and not hand2_cards: return 0
-    if not hand1_cards: return -1 # Empty hand is weaker
-    if not hand2_cards: return 1  # Non-empty hand is stronger than empty
-
-    # Ensure cards are valid before converting
+    if not hand1_cards: return -1
+    if not hand2_cards: return 1
     hand1_cards_valid = [c for c in hand1_cards if isinstance(c, Card)]
     hand2_cards_valid = [c for c in hand2_cards if isinstance(c, Card)]
-
     if not hand1_cards_valid and not hand2_cards_valid: return 0
     if not hand1_cards_valid: return -1
     if not hand2_cards_valid: return 1
-
     hand1_jax = jnp.array([card_to_array(c) for c in hand1_cards_valid], dtype=jnp.int32)
     hand2_jax = jnp.array([card_to_array(c) for c in hand2_cards_valid], dtype=jnp.int32)
+    # compare_hands_jax возвращает JAX скаляр, конвертируем в int здесь
+    return int(compare_hands_jax(hand1_jax, hand2_jax))
 
-    return compare_hands_jax(hand1_jax, hand2_jax)
-
-# _is_dead_hand_py больше не используется в основной логике, но может быть полезна для тестов
 def _is_dead_hand_py(board: Board) -> bool:
-    """Checks if a Board object represents a dead hand using Python logic."""
+    # (Без изменений, используется только для тестов)
     top_full = len(board.top) == 3; middle_full = len(board.middle) == 5; bottom_full = len(board.bottom) == 5
     is_dead = False
     if top_full and middle_full:
@@ -566,58 +632,82 @@ def _is_dead_hand_py(board: Board) -> bool:
         if _compare_hands_py(board.middle, board.bottom) > 0: is_dead = True
     return is_dead
 
+# [ИЗМЕНЕНИЕ ШАГ 5] - Исправлена calculate_royalties_jax
 @jit
 def calculate_royalties_jax(placement_jax: jnp.ndarray, ai_settings: Dict) -> jnp.ndarray:
     """Calculates royalties for a completed board placement (JAX array). Pure JAX."""
     top_cards = placement_jax[0:3]; middle_cards = placement_jax[3:8]; bottom_cards = placement_jax[8:13]
-    top_royalty = 0; is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
-    if is_top_full:
+
+    # --- Top Royalty ---
+    is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
+    def top_royalty_calc():
         top_rank, _ = evaluate_hand_jax(top_cards)
-        top_royalty = jnp.where(top_rank == 6, 10 + top_cards[0, 0], top_royalty) # Trips
+        royalty = jnp.array(0, dtype=jnp.int32) # Инициализация
+        # Trips
+        royalty = jnp.where(top_rank == 6, 10 + top_cards[0, 0], royalty)
+        # Pair 66+
         pair_rank_idx = jnp.argmax(jnp.bincount(jnp.maximum(0, top_cards[:, 0]), length=13) == 2)
-        royalty_for_pair = jnp.maximum(0, pair_rank_idx - Card.RANK_MAP['5']) # Pair 66+
-        top_royalty = jnp.where(top_rank == 8, royalty_for_pair, top_royalty)
-    middle_royalty = 0; is_middle_full = jnp.sum(jnp.any(middle_cards != -1, axis=1)) == 5
-    if is_middle_full:
+        royalty_for_pair = jnp.maximum(0, pair_rank_idx - Card.RANK_MAP['5'])
+        royalty = jnp.where(top_rank == 8, royalty_for_pair, royalty)
+        return royalty
+    top_royalty = lax.cond(is_top_full, top_royalty_calc, lambda: jnp.array(0, dtype=jnp.int32))
+
+    # --- Middle Royalty ---
+    is_middle_full = jnp.sum(jnp.any(middle_cards != -1, axis=1)) == 5
+    def middle_royalty_calc():
         middle_rank, _ = evaluate_hand_jax(middle_cards)
         middle_royalties_map = jnp.array([50, 30, 20, 12, 8, 4, 2, 0, 0, 0, 0], dtype=jnp.int32)
-        middle_royalty = jnp.where(middle_rank < len(middle_royalties_map), middle_royalties_map[middle_rank], 0)
-    bottom_royalty = 0; is_bottom_full = jnp.sum(jnp.any(bottom_cards != -1, axis=1)) == 5
-    if is_bottom_full:
+        # Используем clip для безопасного индексирования
+        safe_rank = jnp.clip(middle_rank, 0, len(middle_royalties_map) - 1)
+        return middle_royalties_map[safe_rank]
+    middle_royalty = lax.cond(is_middle_full, middle_royalty_calc, lambda: jnp.array(0, dtype=jnp.int32))
+
+    # --- Bottom Royalty ---
+    is_bottom_full = jnp.sum(jnp.any(bottom_cards != -1, axis=1)) == 5
+    def bottom_royalty_calc():
         bottom_rank, _ = evaluate_hand_jax(bottom_cards)
         bottom_royalties_map = jnp.array([25, 15, 10, 6, 4, 2, 0, 0, 0, 0, 0], dtype=jnp.int32)
-        bottom_royalty = jnp.where(bottom_rank < len(bottom_royalties_map), bottom_royalties_map[bottom_rank], 0)
+        safe_rank = jnp.clip(bottom_rank, 0, len(bottom_royalties_map) - 1)
+        return bottom_royalties_map[safe_rank]
+    bottom_royalty = lax.cond(is_bottom_full, bottom_royalty_calc, lambda: jnp.array(0, dtype=jnp.int32))
+
     return jnp.array([top_royalty, middle_royalty, bottom_royalty], dtype=jnp.int32)
+
+# [ИЗМЕНЕНИЕ ШАГ 5] - Исправлена is_valid_fantasy_entry_jax
 @jit
 def is_valid_fantasy_entry_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
     """Checks if a completed, non-dead JAX placement qualifies for Fantasy (Standard)."""
-    top_cards = placement[0:3]; is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
-    if not is_top_full: return False
-    top_rank, _ = evaluate_hand_jax(top_cards)
-    is_qualifying_pair = False
-    if top_rank == 8: # Pair
-        pair_rank_idx = jnp.argmax(jnp.bincount(jnp.maximum(0, top_cards[:, 0]), length=13) == 2)
-        is_qualifying_pair = pair_rank_idx >= Card.RANK_MAP['Q'] # QQ+
-    is_trips = top_rank == 6 # Trips
-    return is_trips | is_qualifying_pair
+    top_cards = placement[0:3]
+    is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
+    def check_fantasy():
+        top_rank, _ = evaluate_hand_jax(top_cards)
+        is_qualifying_pair = lax.cond(top_rank == 8, # Если пара
+                                      lambda: jnp.argmax(_get_rank_counts_jax(top_cards) == 2) >= Card.RANK_MAP['Q'],
+                                      lambda: False)
+        is_trips = top_rank == 6
+        return is_trips | is_qualifying_pair
+    # Используем cond для is_top_full
+    return lax.cond(is_top_full, check_fantasy, lambda: False)
+
+# [ИЗМЕНЕНИЕ ШАГ 5] - Исправлена is_valid_fantasy_repeat_jax
 @jit
 def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
     """Checks if a completed, non-dead JAX placement qualifies for REPEAT Fantasy."""
     top_cards = placement[0:3]; bottom_cards = placement[8:13]
     is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
     is_bottom_full = jnp.sum(jnp.any(bottom_cards != -1, axis=1)) == 5
-    if not (is_top_full and is_bottom_full): return False
-    top_rank, _ = evaluate_hand_jax(top_cards); bottom_rank, _ = evaluate_hand_jax(bottom_cards)
-    trips_on_top = top_rank == 6
-    quads_or_better_on_bottom = bottom_rank <= 2 # Quads, SF, RF
-    return trips_on_top | quads_or_better_on_bottom
+    def check_repeat():
+        top_rank, _ = evaluate_hand_jax(top_cards)
+        bottom_rank, _ = evaluate_hand_jax(bottom_cards)
+        trips_on_top = top_rank == 6
+        quads_or_better_on_bottom = bottom_rank <= 2
+        return trips_on_top | quads_or_better_on_bottom
+    # Используем cond для проверки полноты линий
+    return lax.cond(is_top_full & is_bottom_full, check_repeat, lambda: False)
 
 # --- Функции генерации действий ---
-
-# --- [ИЗМЕНЕНИЕ ШАГ 2] ---
-# Новая вспомогательная функция для проверки валидности доски
+# [ИЗМЕНЕНИЕ ШАГ 2] - OK
 def _is_board_valid_py(board: Board) -> bool:
-    """Проверяет, соблюдается ли правило Top <= Middle <= Bottom."""
     middle_ok = True
     if board.top and board.middle:
         if _compare_hands_py(board.top, board.middle) > 0: middle_ok = False
@@ -626,207 +716,148 @@ def _is_board_valid_py(board: Board) -> bool:
         if _compare_hands_py(board.middle, board.bottom) > 0: bottom_ok = False
     return middle_ok and bottom_ok
 
-# --- [ИЗМЕНЕНИЕ ШАГ 2] ---
-# Новый рекурсивный генератор, проверяющий правила на каждом шаге
+# [ИЗМЕНЕНИЕ ШАГ 2] - OK (с небольшим уточнением лимита)
 def _generate_valid_placements_recursive(
     current_board: Board,
     cards_to_place: List[Card],
     ai_settings: Dict,
     max_placements_limit: Optional[int] = None,
-    current_depth_results: Optional[List[Board]] = None # Для передачи лимита
+    # Убрал current_depth_results, лимит проверяется по возвращаемому значению
 ) -> List[Board]:
-    """
-    Рекурсивно генерирует все ВАЛИДНЫЕ размещения для оставшихся карт,
-    проверяя правила OFC (Top <= Middle <= Bottom) после каждого шага.
-    """
-    # Инициализация списка результатов на верхнем уровне рекурсии
-    if current_depth_results is None:
-        current_depth_results = []
+    valid_boards_found = [] # Собираем результаты на этом уровне
 
     # --- Базовый случай рекурсии ---
     if not cards_to_place:
         return [current_board]
 
-    # --- Проверка лимита ---
-    if max_placements_limit is not None and len(current_depth_results) >= max_placements_limit:
-         return [] # Лимит достигнут
+    # --- Проверка лимита перед началом работы на уровне ---
+    # (Лимит применяется к общему числу найденных *до* этого вызова,
+    # но для простоты будем ограничивать число возвращаемых с *этого* уровня)
 
     # --- Рекурсивный шаг ---
     card_to_try = cards_to_place[0]
     remaining_cards = cards_to_place[1:]
     lines = {"top": 3, "middle": 5, "bottom": 5}
-    valid_boards_from_this_level = []
 
     for line_name, max_len in lines.items():
+        # Проверяем лимит перед обработкой новой линии
+        if max_placements_limit is not None and len(valid_boards_found) >= max_placements_limit:
+            break # Прерываем цикл по линиям, если лимит уже достигнут
+
         current_line = getattr(current_board, line_name)
         if len(current_line) < max_len:
-            # Создаем глубокую копию доски
-            next_board = Board()
-            next_board.top = current_board.top[:]
-            next_board.middle = current_board.middle[:]
-            next_board.bottom = current_board.bottom[:]
+            next_board = Board() # Создаем копию
+            next_board.top = current_board.top[:]; next_board.middle = current_board.middle[:]; next_board.bottom = current_board.bottom[:]
             try: next_board.place_card(line_name, card_to_try)
             except ValueError: continue
 
-            # --- ПРОВЕРКА ВАЛИДНОСТИ ДОСКИ ПОСЛЕ РАЗМЕЩЕНИЯ ---
             if _is_board_valid_py(next_board):
-                # Если доска валидна, продолжаем рекурсию
-                # Передаем текущий список результатов для проверки лимита
-                results_from_branch = _generate_valid_placements_recursive(
-                    next_board, remaining_cards, ai_settings, max_placements_limit, current_depth_results
-                )
-                valid_boards_from_this_level.extend(results_from_branch)
-
-                # Обновляем общий список результатов (для проверки лимита)
-                # Делаем это осторожно, чтобы не дублировать
-                # Проще проверять лимит перед рекурсивным вызовом и после получения результатов
+                # Определяем, сколько еще мест нужно найти
+                remaining_limit = None
                 if max_placements_limit is not None:
-                     # Обновляем current_depth_results только уникальными досками, если нужно
-                     # Но для простой проверки лимита достаточно длины
-                     # Этот подход с передачей current_depth_results сложен,
-                     # проще проверять лимит по возвращаемому списку на каждом уровне.
-                     # Переделаем: лимит проверяется по количеству уже найденных на этом уровне.
-                     pass # Логика лимита будет применена при возврате
+                    remaining_limit = max_placements_limit - len(valid_boards_found)
+                    if remaining_limit <= 0: continue # Не ищем больше, если лимит исчерпан
 
-            # Если доска невалидна, ветка отбрасывается
+                # Рекурсивный вызов с обновленным лимитом
+                results_from_branch = _generate_valid_placements_recursive(
+                    next_board, remaining_cards, ai_settings, remaining_limit
+                )
+                valid_boards_found.extend(results_from_branch)
 
-        # Проверка лимита после обработки одной линии
-        if max_placements_limit is not None and len(valid_boards_from_this_level) >= max_placements_limit:
-             return valid_boards_from_this_level[:max_placements_limit]
-
-
-    # Возвращаем результаты с этого уровня рекурсии
+    # Возвращаем найденные доски, обрезанные до лимита, если он есть
     if max_placements_limit is not None:
-        return valid_boards_from_this_level[:max_placements_limit]
+        return valid_boards_found[:max_placements_limit]
     else:
-        return valid_boards_from_this_level
+        return valid_boards_found
 
-
-# --- Старая рекурсивная функция (можно удалить или оставить закомментированной) ---
-# def _generate_placements_recursive(...): ...
-
-# --- get_actions function (Uses Itertools for Street 1, NEW Recursion otherwise) ---
-# [ИЗМЕНЕНИЕ ШАГ 2]
+# [ИЗМЕНЕНИЕ ШАГ 2] - OK
 def get_actions(game_state: GameState) -> jnp.ndarray:
-    """Generates all valid actions (placements + discards) for the current game state."""
-    if game_state.is_terminal():
-        return jnp.empty((0, 17, 2), dtype=jnp.int32)
-
-    hand_cards = game_state.selected_cards.cards
-    num_cards_in_hand = len(hand_cards)
-    if num_cards_in_hand == 0:
-        logger.warning("get_actions called with empty hand.")
-        return jnp.empty((0, 17, 2), dtype=jnp.int32)
-
-    possible_actions_list_jax = []
-    street = game_state.get_street()
-    is_fantasy_turn = game_state.ai_settings.get("in_fantasy_turn", False)
-    num_to_place, num_to_discard = 0, 0
-    placement_limit = 500 # Default limit
-
+    # (Логика определения num_to_place, num_to_discard, placement_limit без изменений)
+    # ...
+    if game_state.is_terminal(): return jnp.empty((0, 17, 2), dtype=jnp.int32)
+    hand_cards = game_state.selected_cards.cards; num_cards_in_hand = len(hand_cards)
+    if num_cards_in_hand == 0: logger.warning("get_actions called with empty hand."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+    possible_actions_list_jax = []; street = game_state.get_street(); is_fantasy_turn = game_state.ai_settings.get("in_fantasy_turn", False)
+    num_to_place, num_to_discard = 0, 0; placement_limit = 500
     if is_fantasy_turn:
-        num_to_place = min(num_cards_in_hand, 13)
-        num_to_discard = num_cards_in_hand - num_to_place
+        num_to_place = min(num_cards_in_hand, 13); num_to_discard = num_cards_in_hand - num_to_place
         placement_limit = game_state.ai_settings.get("fantasy_placement_limit", 2000)
         logger.debug(f"Fantasy turn: Placing {num_to_place}, Discarding {num_to_discard}. Limit: {placement_limit}")
     elif street == 1:
         if num_cards_in_hand == 5: num_to_place, num_to_discard = 5, 0
-        else:
-            logger.error(f"Street 1 error: Hand={num_cards_in_hand} != 5."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+        else: logger.error(f"Street 1 error: Hand={num_cards_in_hand} != 5."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
         placement_limit = game_state.ai_settings.get("street1_placement_limit", 10000)
         logger.debug(f"Street 1: Placing {num_to_place}, Discarding {num_to_discard}. Limit: {placement_limit}")
     elif 2 <= street <= 5:
         if num_cards_in_hand == 3: num_to_place, num_to_discard = 2, 1
-        else:
-            logger.error(f"Street {street} error: Hand={num_cards_in_hand} != 3."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+        else: logger.error(f"Street {street} error: Hand={num_cards_in_hand} != 3."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
         placement_limit = game_state.ai_settings.get("normal_placement_limit", 500)
         logger.debug(f"Street {street}: Placing {num_to_place}, Discarding {num_to_discard}. Limit: {placement_limit}")
-    else:
-        logger.error(f"get_actions called on invalid street {street}."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
-
-    action_count_total = 0
-    max_total_actions = placement_limit * 10 # Overall safety limit
+    else: logger.error(f"get_actions called on invalid street {street}."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+    action_count_total = 0; max_total_actions = placement_limit * 20 # Увеличил общий запас
 
     # --- Улица 1 (Itertools) ---
     if street == 1 and num_to_place == 5:
+        # (Логика без изменений)
         logger.debug("Using Itertools for Street 1 action generation.")
-        cards_to_place = hand_cards; cards_to_discard = []
-        discard_jax = jnp.full((4, 2), -1, dtype=jnp.int32)
-        initial_placement_py = [None] * 13
-        if game_state.board.get_placed_count() != 0:
-             logger.error("Cannot handle non-empty board with Street 1 itertools logic."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
+        cards_to_place = hand_cards; cards_to_discard = []; discard_jax = jnp.full((4, 2), -1, dtype=jnp.int32)
+        if game_state.board.get_placed_count() != 0: logger.error("Cannot handle non-empty board with Street 1 itertools logic."); return jnp.empty((0, 17, 2), dtype=jnp.int32)
         available_slots = list(range(13))
-
         for slot_indices_tuple in itertools.combinations(available_slots, 5):
-            if action_count_total >= max_total_actions: break
+            if action_count_total >= max_total_actions: logger.warning(f"Max total actions ({max_total_actions}) reached during St1 combo iteration."); break
             slot_indices = list(slot_indices_tuple)
             for card_permutation_tuple in itertools.permutations(cards_to_place):
-                if action_count_total >= max_total_actions: break
+                if action_count_total >= max_total_actions: logger.warning(f"Max total actions ({max_total_actions}) reached during St1 perm iteration."); break
                 current_placement_py = [None] * 13; valid_placement_attempt = True
                 try:
                     for i, slot_idx in enumerate(slot_indices): current_placement_py[slot_idx] = card_permutation_tuple[i]
                 except IndexError: valid_placement_attempt = False; continue
                 if valid_placement_attempt:
                     placement_13_jax = placement_py_to_jax(current_placement_py)
-                    # Проверка на мертвую руку здесь не нужна (5 карт не могут быть мертвыми)
                     action_17 = jnp.concatenate((placement_13_jax, discard_jax), axis=0)
-                    possible_actions_list_jax.append(action_17)
-                    action_count_total += 1
+                    possible_actions_list_jax.append(action_17); action_count_total += 1
             if action_count_total >= max_total_actions: break
 
     # --- Улицы 2-5 / Фантазия (НОВАЯ Рекурсия) ---
     elif num_to_place > 0 :
+        # (Логика вызова новой рекурсии без изменений)
         logger.debug(f"Using NEW Recursive generator for Street {street}/Fantasy. Placing {num_to_place}, Discarding {num_to_discard}")
-        initial_board_obj = Board()
-        initial_board_obj.top = game_state.board.top[:]
-        initial_board_obj.middle = game_state.board.middle[:]
-        initial_board_obj.bottom = game_state.board.bottom[:]
-
+        initial_board_obj = Board(); initial_board_obj.top = game_state.board.top[:]; initial_board_obj.middle = game_state.board.middle[:]; initial_board_obj.bottom = game_state.board.bottom[:]
         for cards_to_place_tuple in itertools.combinations(hand_cards, num_to_place):
-            if action_count_total >= max_total_actions: break
-            cards_to_place = list(cards_to_place_tuple)
-            cards_to_discard = [card for card in hand_cards if card not in cards_to_place]
+            if action_count_total >= max_total_actions: logger.warning(f"Max total actions ({max_total_actions}) reached during combo iteration."); break
+            cards_to_place = list(cards_to_place_tuple); cards_to_discard = [card for card in hand_cards if card not in cards_to_place]
             if len(cards_to_discard) != num_to_discard: continue
-
             discard_jax = jnp.full((4, 2), -1, dtype=jnp.int32)
             for i, card in enumerate(cards_to_discard):
                 if i < 4: discard_jax = discard_jax.at[i].set(card_to_array(card))
-
-            board_copy_for_recursion = Board()
-            board_copy_for_recursion.top = initial_board_obj.top[:]
-            board_copy_for_recursion.middle = initial_board_obj.middle[:]
-            board_copy_for_recursion.bottom = initial_board_obj.bottom[:]
-
-            # Лимит для этой комбинации
-            # Упрощенный лимит: используем общий placement_limit для каждой комбинации
-            current_limit = placement_limit
-
+            board_copy_for_recursion = Board(); board_copy_for_recursion.top = initial_board_obj.top[:]; board_copy_for_recursion.middle = initial_board_obj.middle[:]; board_copy_for_recursion.bottom = initial_board_obj.bottom[:]
+            current_limit = placement_limit # Лимит на комбинацию
             # Вызов НОВОЙ рекурсивной функции
-            valid_final_boards_for_combo = _generate_valid_placements_recursive(
-                board_copy_for_recursion, cards_to_place, game_state.ai_settings, max_placements_limit=current_limit
-            )
-
-            if len(valid_final_boards_for_combo) >= current_limit:
-                 logger.warning(f"Placement limit ({current_limit}) reached for combo: {cards_to_place}")
-
+            valid_final_boards_for_combo = _generate_valid_placements_recursive(board_copy_for_recursion, cards_to_place, game_state.ai_settings, max_placements_limit=current_limit)
+            if len(valid_final_boards_for_combo) >= current_limit: logger.warning(f"Placement limit ({current_limit}) reached for combo: {cards_to_place}")
             for final_board in valid_final_boards_for_combo:
                 placement_13_jax = final_board.to_jax_placement()
                 action_17 = jnp.concatenate((placement_13_jax, discard_jax), axis=0)
-                possible_actions_list_jax.append(action_17)
-                action_count_total += 1
+                possible_actions_list_jax.append(action_17); action_count_total += 1
                 if action_count_total >= max_total_actions: break
             if action_count_total >= max_total_actions: break
 
     # --- Финальная проверка и возврат ---
+    # (Логика без изменений)
     num_generated = len(possible_actions_list_jax)
-    if num_generated == 0:
-        logger.warning(f"No valid actions generated for P{game_state.current_player} on St {street}. Hand: {hand_cards}, Board:\n{game_state.board}")
-        return jnp.empty((0, 17, 2), dtype=jnp.int32)
+    if num_generated == 0: logger.warning(f"No valid actions generated for P{game_state.current_player} on St {street}. Hand: {hand_cards}, Board:\n{game_state.board}"); return jnp.empty((0, 17, 2), dtype=jnp.int32)
     else:
         logger.info(f"Generated {num_generated} actions for P{game_state.current_player} on St {street}.")
-        correct_shape_actions = [a for a in possible_actions_list_jax if a.shape == (17, 2)]
+        # Проверка формы перед stack
+        correct_shape_actions = []
+        for i, a in enumerate(possible_actions_list_jax):
+            if hasattr(a, 'shape') and a.shape == (17, 2):
+                correct_shape_actions.append(a)
+            else:
+                logger.error(f"Action at index {i} has incorrect shape or type: {type(a)}, shape={getattr(a, 'shape', 'N/A')}")
+
         if len(correct_shape_actions) != num_generated:
-             logger.error(f"Inconsistent action shapes! Correct: {len(correct_shape_actions)}/{num_generated}")
+             logger.error(f"Correctly shaped actions: {len(correct_shape_actions)}/{num_generated}")
              if not correct_shape_actions: return jnp.empty((0, 17, 2), dtype=jnp.int32)
              return jnp.stack(correct_shape_actions)
         else:
@@ -836,6 +867,7 @@ def get_actions(game_state: GameState) -> jnp.ndarray:
 # --- Вспомогательные функции для эвристической оценки (Python) ---
 # (Без изменений)
 def _evaluate_partial_combination_py(cards: List[Card], row_type: str) -> float:
+    # ... (код без изменений) ...
     if not cards: return 0.0; score = 0.0; n = len(cards)
     ranks = [card.rank for card in cards]; suits = [card.suit for card in cards]
     rank_indices = sorted([r for r in [Card.RANK_MAP.get(rank, -1) for rank in ranks] if r != -1])
@@ -867,13 +899,12 @@ def _is_middle_stronger_or_equal_py(board: Board) -> bool:
     if not board.middle or not board.top: return True
     return _compare_hands_py(board.middle, board.top) >= 0
 def heuristic_baseline_evaluation(state: GameState, ai_settings: Dict) -> float:
+    # (Без изменений, но теперь использует is_dead_hand_jax)
     board = state.board; is_full = board.is_full(); total_score = 0.0
-    placement_jax = board.to_jax_placement() # Получаем один раз
-    # Используем JAX для проверки мертвой руки
+    placement_jax = board.to_jax_placement()
     if is_full and is_dead_hand_jax(placement_jax): return -1000.0
     COMBINATION_WEIGHTS = jnp.array([100.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 5.0, 0.0], dtype=jnp.float32)
-    ROW_MULTIPLIERS = {"top": 1.0, "middle": 1.2, "bottom": 1.5}
-    max_cards_in_row = {"top": 3, "middle": 5, "bottom": 5}
+    ROW_MULTIPLIERS = {"top": 1.0, "middle": 1.2, "bottom": 1.5}; max_cards_in_row = {"top": 3, "middle": 5, "bottom": 5}
     rows_data = {"top": board.top, "middle": board.middle, "bottom": board.bottom}
     for row_name, cards_list in rows_data.items():
         row_score = 0.0; num_cards_in_row = len(cards_list); max_cards = max_cards_in_row[row_name]
@@ -881,7 +912,9 @@ def heuristic_baseline_evaluation(state: GameState, ai_settings: Dict) -> float:
             if num_cards_in_row == max_cards:
                 cards_jax = jnp.array([card_to_array(c) for c in cards_list], dtype=jnp.int32)
                 rank, kickers = evaluate_hand_jax(cards_jax)
-                if rank < len(COMBINATION_WEIGHTS): row_score += COMBINATION_WEIGHTS[rank]
+                # Используем clip для безопасного индексирования
+                safe_rank = jnp.clip(rank, 0, len(COMBINATION_WEIGHTS) - 1)
+                row_score += COMBINATION_WEIGHTS[safe_rank]
                 row_score += float(jnp.sum(kickers[kickers != -1])) * 0.01
             else: row_score += _evaluate_partial_combination_py(cards_list, row_name)
         total_score += row_score * ROW_MULTIPLIERS[row_name]
@@ -896,15 +929,15 @@ def heuristic_baseline_evaluation(state: GameState, ai_settings: Dict) -> float:
         rank_value = Card.RANK_MAP.get(card.rank, -1)
         discard_penalty += (rank_value + 1) * 0.1 if rank_value != -1 else 0
     total_score -= discard_penalty
-    if is_full: # Мертвая рука уже проверена
+    if is_full:
         current_royalties = calculate_royalties_jax(placement_jax, ai_settings)
         total_score += float(jnp.sum(current_royalties)) * 0.5
     return total_score
 
+
 # --- Класс CFRNode ---
 # (Без изменений)
 class CFRNode:
-    """Узел в дереве CFR, хранящий сожаления и сумму стратегий."""
     def __init__(self, num_actions: int):
         if num_actions < 0: raise ValueError("Number of actions cannot be negative")
         self.num_actions = num_actions
@@ -912,12 +945,10 @@ class CFRNode:
             self.regret_sum = jnp.zeros(self.num_actions, dtype=jnp.float32)
             self.strategy_sum = jnp.zeros(self.num_actions, dtype=jnp.float32)
         else:
-            self.regret_sum = jnp.array([], dtype=jnp.float32)
-            self.strategy_sum = jnp.array([], dtype=jnp.float32)
+            self.regret_sum = jnp.array([], dtype=jnp.float32); self.strategy_sum = jnp.array([], dtype=jnp.float32)
     def get_strategy(self, realization_weight: float) -> jnp.ndarray:
         if self.num_actions == 0: return jnp.array([], dtype=jnp.float32)
-        positive_regret_sum = jnp.maximum(self.regret_sum, 0)
-        normalizing_sum = jnp.sum(positive_regret_sum)
+        positive_regret_sum = jnp.maximum(self.regret_sum, 0); normalizing_sum = jnp.sum(positive_regret_sum)
         uniform_strategy = jnp.ones(self.num_actions, dtype=jnp.float32) / self.num_actions
         strategy = jnp.where(normalizing_sum > 0, positive_regret_sum / normalizing_sum, uniform_strategy)
         if realization_weight > 1e-9: self.strategy_sum = self.strategy_sum + (realization_weight * strategy)
@@ -930,9 +961,10 @@ class CFRNode:
         return avg_strategy
 
 # --- Класс CFRAgent ---
+# (Изменения в _play_one_game_for_cfr для использования JAX)
 class CFRAgent:
-    """Агент, использующий Counterfactual Regret Minimization (MCCFR вариант) с параллелизацией на потоках."""
     def __init__(self, iterations: int = 1000000, stop_threshold: float = 0.001, batch_size: int = 64, max_nodes: int = 1000000, ai_settings: Optional[Dict] = None, num_workers: Optional[int] = None):
+        # (Логика __init__ без изменений)
         self.iterations = iterations; self.stop_threshold = stop_threshold
         self.save_interval = 2000; self.convergence_check_interval = 50000
         self.key = random.PRNGKey(int(time.time()))
@@ -948,6 +980,7 @@ class CFRAgent:
         logger.info(f"Save Interval: {self.save_interval} games, Convergence Check Interval: {self.convergence_check_interval} games")
 
     def get_node(self, info_set: str, num_actions: int) -> Optional[CFRNode]:
+        # (Без изменений)
         if num_actions < 0: logger.error(f"Negative actions: {num_actions}"); return None
         info_hash = hash(info_set); node = self.nodes_map.get(info_hash)
         if node is None:
@@ -962,6 +995,7 @@ class CFRAgent:
         return node
 
     def get_move(self, game_state: GameState, timeout_event: Event, result: Dict) -> None:
+        # (Без изменений)
         start_time = time.time(); actions_jax = get_actions(game_state); num_available_actions = actions_jax.shape[0]
         logger.info(f"get_move: Found {num_available_actions} actions.")
         if num_available_actions == 0: result["move"] = {"error": "Нет доступных ходов"}; logger.warning("No actions available in get_move."); return
@@ -969,7 +1003,6 @@ class CFRAgent:
         if node is not None:
             logger.debug(f"Node found for info_set hash {hash(info_set)}. Using average strategy.")
             avg_strategy = node.get_average_strategy()
-            # Исправлена проверка: node.num_actions > 0
             if avg_strategy.shape[0] == num_available_actions and node.num_actions > 0:
                 best_action_index = int(jnp.argmax(avg_strategy))
                 logger.debug(f"Chose action {best_action_index} based on max avg strategy.")
@@ -989,6 +1022,7 @@ class CFRAgent:
         logger.info(f"get_move finished in {end_time - start_time:.4f}s. Chosen action index: {best_action_index}. Move: {move}")
 
     def _get_best_action_baseline(self, game_state: GameState, actions_jax: jnp.ndarray) -> int:
+        # (Без изменений)
         best_score = -float('inf'); best_action_index = -1; current_key = self.key
         logger.debug(f"Evaluating {actions_jax.shape[0]} actions using baseline heuristic...")
         for i, action_array in enumerate(actions_jax):
@@ -1009,30 +1043,28 @@ class CFRAgent:
         return best_action_index
 
     def baseline_evaluation(self, state: GameState) -> float:
+        # (Без изменений)
         if not isinstance(state, GameState): logger.error("Invalid state passed to baseline_evaluation."); return -float('inf')
         return heuristic_baseline_evaluation(state, self.ai_settings)
 
     def train(self, timeout_event: Event, result: Dict) -> None:
+        # (Без изменений)
         logger.info(f"Starting CFR training for up to {self.iterations} iterations...")
         logger.info(f"Using {self.num_workers} worker threads with batch size {self.batch_size}.")
         start_time = time.time(); total_games_processed = 0
-        self.load_progress() # Загружаем прогресс
-        # TODO: Учесть загруженные итерации при необходимости
+        self.load_progress()
         num_batches = (self.iterations + self.batch_size - 1) // self.batch_size
         logger.info(f"Total batches to run: {num_batches}")
-
         for i in range(num_batches):
             batch_start_time = time.time()
             current_batch_size = min(self.batch_size, self.iterations - (i * self.batch_size))
             if current_batch_size <= 0: break
             if timeout_event.is_set(): logger.info(f"Training interrupted by timeout before batch {i+1}."); break
-
             keys_batch = random.split(self.key, current_batch_size + 1); self.key = keys_batch[0]; keys_for_workers = keys_batch[1:]
             deck_template = Card.get_all_cards(); deck_list = [deck_template[:] for _ in range(current_batch_size)]
             trajectories_batch = []
             games_in_batch_started = i * self.batch_size
             logger.info(f"Starting Batch {i+1}/{num_batches} ({current_batch_size} games, Total started: {games_in_batch_started})...")
-
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
                 future_to_idx = {executor.submit(self._play_one_game_for_cfr, keys_for_workers[k], deck_list[k]): k for k in range(current_batch_size)}
                 num_sim_success = 0; num_sim_failed = 0
@@ -1044,7 +1076,6 @@ class CFRAgent:
                         else: logger.warning(f"Game simulation {idx_in_batch} in batch {i+1} returned None."); num_sim_failed += 1
                     except Exception as exc: logger.error(f'Game simulation {idx_in_batch} in batch {i+1} generated an exception: {exc}', exc_info=True); num_sim_failed += 1
             logger.info(f"Batch {i+1} simulations finished. Success: {num_sim_success}, Failed: {num_sim_failed}.")
-
             batch_updates = 0
             if trajectories_batch:
                 logger.info(f"Processing {len(trajectories_batch)} trajectories for strategy update...")
@@ -1052,52 +1083,35 @@ class CFRAgent:
                     try: self._update_strategy_from_trajectory(trajectory); total_games_processed += 1; batch_updates += 1
                     except Exception as e: logger.exception(f"Error updating strategy from trajectory in batch {i+1}: {e}")
             else: logger.warning(f"No successful trajectories to process in batch {i+1}.")
-
             batch_time = time.time() - batch_start_time
             logger.info(f"Batch {i+1}/{num_batches} finished in {batch_time:.2f}s. Strategy updates: {batch_updates}. Total games processed: {total_games_processed}")
-
             processed_before_batch = total_games_processed - batch_updates
-            last_save_milestone = (processed_before_batch // self.save_interval)
-            current_save_milestone = (total_games_processed // self.save_interval)
-            if current_save_milestone > last_save_milestone:
-                 logger.info(f"Reached save interval. Saving progress at {total_games_processed} games.")
-                 self.save_progress(total_games_processed) # Передаем актуальное число игр
-
-            last_conv_check_milestone = (processed_before_batch // self.convergence_check_interval)
-            current_conv_check_milestone = (total_games_processed // self.convergence_check_interval)
+            last_save_milestone = (processed_before_batch // self.save_interval); current_save_milestone = (total_games_processed // self.save_interval)
+            if current_save_milestone > last_save_milestone: logger.info(f"Reached save interval. Saving progress at {total_games_processed} games."); self.save_progress(total_games_processed)
+            last_conv_check_milestone = (processed_before_batch // self.convergence_check_interval); current_conv_check_milestone = (total_games_processed // self.convergence_check_interval)
             if current_conv_check_milestone > last_conv_check_milestone:
                 logger.info(f"Reached convergence check interval. Checking convergence at {total_games_processed} games.")
-                if self.check_convergence():
-                    logger.info(f"Convergence threshold reached after {total_games_processed} games. Stopping training.")
-                    break
+                if self.check_convergence(): logger.info(f"Convergence threshold reached after {total_games_processed} games. Stopping training."); break
             if timeout_event.is_set(): logger.info(f"Training interrupted by timeout after batch {i+1}."); break
-
         total_time = time.time() - start_time
         logger.info(f"Training finished. Total successful games processed: {total_games_processed} in {total_time:.2f} seconds.")
         logger.info(f"Total CFR nodes created: {len(self.nodes_map)}")
-        logger.info("Saving final progress...")
-        self.save_progress(total_games_processed) # Сохраняем финальный прогресс
-        logger.info("Final progress saved.")
+        logger.info("Saving final progress..."); self.save_progress(total_games_processed); logger.info("Final progress saved.")
         result["status"] = "Training completed"; result["nodes_count"] = len(self.nodes_map); result["games_processed"] = total_games_processed
 
-    # [ИЗМЕНЕНИЕ ШАГ 3 и 4]
+    # [ИЗМЕНЕНИЕ ШАГ 3 и 4] - OK
     def _play_one_game_for_cfr(self, key: jax.random.PRNGKey, deck: List[Card]) -> Optional[Dict]:
-        """ Разыгрывает одну партию OFC Pineapple для сбора траектории для MCCFR. """
+        # (Логика симуляции с исправлениями для Фантазии и JAX-проверками мертвой руки)
         game_start_time = time.time()
         try:
-            key, subkey = random.split(key)
-            shuffled_indices = random.permutation(subkey, jnp.arange(52))
-            shuffled_deck = [deck[int(i)] for i in shuffled_indices]
-            deck_iter = iter(shuffled_deck)
-            game_states = {
-                0: GameState(ai_settings=self.ai_settings.copy(), current_player=0, deck=shuffled_deck),
-                1: GameState(ai_settings=self.ai_settings.copy(), current_player=1, deck=shuffled_deck)
-            }
+            key, subkey = random.split(key); shuffled_indices = random.permutation(subkey, jnp.arange(52))
+            shuffled_deck = [deck[int(i)] for i in shuffled_indices]; deck_iter = iter(shuffled_deck)
+            game_states = {0: GameState(ai_settings=self.ai_settings.copy(), current_player=0, deck=shuffled_deck), 1: GameState(ai_settings=self.ai_settings.copy(), current_player=1, deck=shuffled_deck)}
             game_states[0].opponent_board = game_states[1].board; game_states[0].opponent_discarded = game_states[1].discarded_cards
             game_states[1].opponent_board = game_states[0].board; game_states[1].opponent_discarded = game_states[0].discarded_cards
             player_fantasies = {0: False, 1: False}; fantasy_cards_count = {0: 0, 1: 0}; player_finished = {0: False, 1: False}
             trajectory = {'states': [], 'actions': [], 'reach_probs': [], 'sampling_probs': [], 'final_payoff': 0}
-            reach_p0 = 1.0; reach_p1 = 1.0; current_player = 0; turn_count = 0; max_turns = 60
+            reach_p0 = 1.0; reach_p1 = 1.0; current_player = 0; turn_count = 0; max_turns = 60 # Увеличил max_turns на всякий случай
 
             while not (player_finished[0] and player_finished[1]):
                 turn_count += 1
@@ -1111,99 +1125,70 @@ class CFRAgent:
                     num_to_draw = 0
                     if is_fantasy_turn_now:
                         num_to_draw = fantasy_cards_count[current_player]
-                        if num_to_draw <= 0:
-                             logger.error(f"P{current_player} in fantasy but card count is {num_to_draw}. Resetting."); player_fantasies[current_player] = False
-                             player_finished[current_player] = True; current_player = opponent; continue
-                        fantasy_cards_count[current_player] = 0 # Сбрасываем счетчик карт на этот ход
-                        logger.debug(f"P{current_player} Fantasy turn: drawing {num_to_draw} cards.")
+                        if num_to_draw <= 0: logger.error(f"P{current_player} in fantasy but card count is {num_to_draw}. Resetting."); player_fantasies[current_player] = False; player_finished[current_player] = True; current_player = opponent; continue
+                        fantasy_cards_count[current_player] = 0; logger.debug(f"P{current_player} Fantasy turn: drawing {num_to_draw} cards.")
                     else: # Normal turn
                         street = state.get_street()
                         if street == 1: num_to_draw = 5
                         elif 2 <= street <= 5: num_to_draw = 3
                         elif street == 6:
                              if state.is_terminal():
-                                 logger.debug(f"P{current_player} board full (Street {street}). Finishing player.")
-                                 player_finished[current_player] = True
-                                 # Проверка фантазии при завершении доски (не во время фантазии)
-                                 current_place_jax = state.board.to_jax_placement() # JAX-представление
-                                 if not is_dead_hand_jax(current_place_jax): # Используем JAX
-                                     if state.is_valid_fantasy_entry(): # Используем JAX
-                                         f_count = state.get_fantasy_cards_count() # Используем JAX
-                                         if f_count > 0:
-                                             logger.info(f"P{current_player} QUALIFIES for Fantasy ({f_count} cards) on turn end!")
-                                             player_fantasies[current_player] = True
-                                             fantasy_cards_count[current_player] = f_count
-                                             player_finished[current_player] = False # Не завершен, т.к. будет фантазия
+                                 logger.debug(f"P{current_player} board full (Street {street}). Finishing player."); player_finished[current_player] = True
+                                 current_place_jax = state.board.to_jax_placement()
+                                 if not is_dead_hand_jax(current_place_jax):
+                                     if state.is_valid_fantasy_entry():
+                                         f_count = state.get_fantasy_cards_count()
+                                         if f_count > 0: logger.info(f"P{current_player} QUALIFIES for Fantasy ({f_count} cards) on turn end!"); player_fantasies[current_player] = True; fantasy_cards_count[current_player] = f_count; player_finished[current_player] = False
                                          else: logger.warning(f"P{current_player} met fantasy entry but got 0 cards?")
                                  else: logger.debug(f"P{current_player} finished dead. No fantasy check.")
                                  current_player = opponent; continue
                              else: logger.error(f"Street {street} but board not terminal."); return None
                         else: logger.error(f"Invalid street {street} for drawing."); return None
                     try:
-                        drawn_cards = [next(deck_iter) for _ in range(num_to_draw)]
-                        state.selected_cards = Hand(drawn_cards)
+                        drawn_cards = [next(deck_iter) for _ in range(num_to_draw)]; state.selected_cards = Hand(drawn_cards)
                         logger.debug(f"P{current_player} drew {num_to_draw}. New Hand: {state.selected_cards}")
                     except StopIteration: logger.error("Deck empty during draw."); player_finished[0]=True; player_finished[1]=True; continue
 
                 info_set = state.get_information_set()
-                state.ai_settings["in_fantasy_turn"] = is_fantasy_turn_now # Передаем флаг для get_actions
-                actions_jax = get_actions(state)
+                state.ai_settings["in_fantasy_turn"] = is_fantasy_turn_now
+                actions_jax = get_actions(state) # Может быть долгим
                 num_actions = actions_jax.shape[0]
-                state.ai_settings["in_fantasy_turn"] = False # Сбрасываем флаг
+                state.ai_settings["in_fantasy_turn"] = False
 
                 if num_actions == 0:
                     if state.is_terminal():
-                        logger.debug(f"P{current_player} has no actions and board is full. Finishing player.")
-                        player_finished[current_player] = True
-                        current_place_jax = state.board.to_jax_placement() # JAX-представление
-                        if not is_dead_hand_jax(current_place_jax): # Используем JAX
+                        logger.debug(f"P{current_player} has no actions and board is full. Finishing player."); player_finished[current_player] = True
+                        current_place_jax = state.board.to_jax_placement()
+                        if not is_dead_hand_jax(current_place_jax):
                             if is_fantasy_turn_now: # Проверка повтора
-                                if state.is_valid_fantasy_repeat(): # Используем JAX
-                                    # --- ИСПРАВЛЕНИЕ ШАГ 3: Явно 14 карт для повтора ---
-                                    f_repeat_count = 14
-                                    logger.info(f"P{current_player} REPEATS Fantasy ({f_repeat_count} cards)!")
-                                    player_fantasies[current_player] = True
-                                    fantasy_cards_count[current_player] = f_repeat_count # <--- Устанавливаем 14
-                                    player_finished[current_player] = False
-                                else:
-                                    logger.info(f"P{current_player} finished Fantasy, did not repeat.")
-                                    player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
-                            else: # Проверка входа (если не в фантазии)
-                                if state.is_valid_fantasy_entry(): # Используем JAX
-                                    f_count = state.get_fantasy_cards_count() # Используем JAX
-                                    if f_count > 0:
-                                        logger.info(f"P{current_player} QUALIFIES for Fantasy ({f_count} cards) after no actions!")
-                                        player_fantasies[current_player] = True
-                                        fantasy_cards_count[current_player] = f_count
-                                        player_finished[current_player] = False
+                                if state.is_valid_fantasy_repeat():
+                                    f_repeat_count = 14; logger.info(f"P{current_player} REPEATS Fantasy ({f_repeat_count} cards)!"); player_fantasies[current_player] = True; fantasy_cards_count[current_player] = f_repeat_count; player_finished[current_player] = False
+                                else: logger.info(f"P{current_player} finished Fantasy, did not repeat."); player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
+                            else: # Проверка входа
+                                if state.is_valid_fantasy_entry():
+                                    f_count = state.get_fantasy_cards_count()
+                                    if f_count > 0: logger.info(f"P{current_player} QUALIFIES for Fantasy ({f_count} cards) after no actions!"); player_fantasies[current_player] = True; fantasy_cards_count[current_player] = f_count; player_finished[current_player] = False
                                     else: logger.warning(f"P{current_player} met fantasy entry but got 0 cards (no actions)?")
-                        else:
-                             logger.debug(f"P{current_player} finished dead (no actions). No fantasy check.")
-                             player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
+                        else: logger.debug(f"P{current_player} finished dead (no actions). No fantasy check."); player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
                         current_player = opponent; continue
                     else: logger.error(f"No actions for P{current_player} in non-terminal state!"); return None
 
                 node = self.get_node(info_set, num_actions)
                 action_index = -1; sampling_prob = 1.0 / num_actions
                 if node is not None:
-                    current_reach = reach_p0 if current_player == 0 else reach_p1
-                    strategy = node.get_strategy(current_reach)
-                    if strategy.shape[0] == num_actions and abs(jnp.sum(strategy) - 1.0) < 1e-5:
-                        key, subkey = random.split(key)
-                        action_index = int(np.random.choice(np.arange(num_actions), p=np.array(strategy)))
-                        sampling_prob = strategy[action_index]
-                    else:
-                        logger.warning(f"Strategy shape/sum mismatch ({strategy.shape[0]} vs {num_actions}, sum={jnp.sum(strategy):.4f}). Using baseline."); action_index = self._get_best_action_baseline(state, actions_jax)
+                    current_reach = reach_p0 if current_player == 0 else reach_p1; strategy = node.get_strategy(current_reach)
+                    # Добавил проверку node.num_actions > 0
+                    if strategy.shape[0] == num_actions and node.num_actions > 0 and abs(jnp.sum(strategy) - 1.0) < 1e-5:
+                        key, subkey = random.split(key); action_index = int(np.random.choice(np.arange(num_actions), p=np.array(strategy))); sampling_prob = strategy[action_index]
+                    else: logger.warning(f"Strategy shape/sum mismatch ({strategy.shape[0]} vs {num_actions}, sum={jnp.sum(strategy):.4f}). Using baseline."); action_index = self._get_best_action_baseline(state, actions_jax)
                 else: logger.warning(f"Node error/limit for node {hash(info_set)}. Using baseline."); action_index = self._get_best_action_baseline(state, actions_jax)
 
                 if action_index < 0 or action_index >= num_actions: logger.error(f"Invalid action index {action_index}."); return None
                 chosen_action_jax = actions_jax[action_index]; action_dict = action_from_array(chosen_action_jax)
                 if not action_dict: logger.error(f"Invalid action_dict from index {action_index}."); return None
 
-                trajectory['states'].append((hash(info_set), current_player, num_actions))
-                trajectory['actions'].append(action_index)
-                trajectory['reach_probs'].append((reach_p0, reach_p1))
-                trajectory['sampling_probs'].append(max(float(sampling_prob), 1e-9))
+                trajectory['states'].append((hash(info_set), current_player, num_actions)); trajectory['actions'].append(action_index)
+                trajectory['reach_probs'].append((reach_p0, reach_p1)); trajectory['sampling_probs'].append(max(float(sampling_prob), 1e-9))
 
                 if current_player == 0: reach_p0 *= sampling_prob
                 else: reach_p1 *= sampling_prob
@@ -1215,36 +1200,21 @@ class CFRAgent:
                     opp_state.opponent_board = new_state.board; opp_state.opponent_discarded = new_state.discarded_cards
                 except Exception as e: logger.exception(f"Error applying action {action_index} ({action_dict}): {e}"); return None
 
-                # Проверка состояния ПОСЛЕ хода
                 current_state_after_action = game_states[current_player]
                 if current_state_after_action.is_terminal():
-                    logger.debug(f"P{current_player} finished board after action {action_index}.")
-                    player_finished[current_player] = True
-                    current_place_jax = current_state_after_action.board.to_jax_placement() # JAX-представление
-                    if not is_dead_hand_jax(current_place_jax): # Используем JAX
+                    logger.debug(f"P{current_player} finished board after action {action_index}."); player_finished[current_player] = True
+                    current_place_jax = current_state_after_action.board.to_jax_placement()
+                    if not is_dead_hand_jax(current_place_jax):
                         if is_fantasy_turn_now: # Проверка повтора
-                            if current_state_after_action.is_valid_fantasy_repeat(): # Используем JAX
-                                # --- ИСПРАВЛЕНИЕ ШАГ 3: Явно 14 карт для повтора ---
-                                f_repeat_count = 14
-                                logger.info(f"P{current_player} REPEATS Fantasy ({f_repeat_count} cards) after action!")
-                                player_fantasies[current_player] = True
-                                fantasy_cards_count[current_player] = f_repeat_count # <--- Устанавливаем 14
-                                player_finished[current_player] = False
-                            else:
-                                logger.info(f"P{current_player} finished Fantasy, did not repeat.")
-                                player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
+                            if current_state_after_action.is_valid_fantasy_repeat():
+                                f_repeat_count = 14; logger.info(f"P{current_player} REPEATS Fantasy ({f_repeat_count} cards) after action!"); player_fantasies[current_player] = True; fantasy_cards_count[current_player] = f_repeat_count; player_finished[current_player] = False
+                            else: logger.info(f"P{current_player} finished Fantasy, did not repeat."); player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
                         else: # Проверка входа
-                            if current_state_after_action.is_valid_fantasy_entry(): # Используем JAX
-                                f_count = current_state_after_action.get_fantasy_cards_count() # Используем JAX
-                                if f_count > 0:
-                                    logger.info(f"P{current_player} QUALIFIES for Fantasy ({f_count} cards) after action!")
-                                    player_fantasies[current_player] = True
-                                    fantasy_cards_count[current_player] = f_count
-                                    player_finished[current_player] = False
+                            if current_state_after_action.is_valid_fantasy_entry():
+                                f_count = current_state_after_action.get_fantasy_cards_count()
+                                if f_count > 0: logger.info(f"P{current_player} QUALIFIES for Fantasy ({f_count} cards) after action!"); player_fantasies[current_player] = True; fantasy_cards_count[current_player] = f_count; player_finished[current_player] = False
                                 else: logger.warning(f"P{current_player} met fantasy entry but got 0 cards (after action)?")
-                    else:
-                        logger.debug(f"P{current_player} finished dead after action. No fantasy check.")
-                        player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
+                    else: logger.debug(f"P{current_player} finished dead after action. No fantasy check."); player_fantasies[current_player] = False; fantasy_cards_count[current_player] = 0
 
                 current_player = opponent # Переход хода
 
@@ -1253,31 +1223,26 @@ class CFRAgent:
             game_states[0].opponent_board = game_states[1].board; game_states[0].opponent_discarded = game_states[1].discarded_cards
             game_states[1].opponent_board = game_states[0].board; game_states[1].opponent_discarded = game_states[0].discarded_cards
             final_payoff_p0 = 0
-            if game_states[0].is_terminal() and game_states[1].is_terminal():
-                 final_payoff_p0 = game_states[0].get_payoff()
+            if game_states[0].is_terminal() and game_states[1].is_terminal(): final_payoff_p0 = game_states[0].get_payoff()
             else: logger.error(f"Game ended but boards not terminal? P0 Full: {game_states[0].is_terminal()}, P1 Full: {game_states[1].is_terminal()}")
-            trajectory['final_payoff'] = final_payoff_p0
-            game_end_time = time.time()
+            trajectory['final_payoff'] = final_payoff_p0; game_end_time = time.time()
             logger.debug(f"Game simulation took {game_end_time - game_start_time:.4f}s. Final Payoff P0: {final_payoff_p0}")
             return trajectory
         except Exception as e: logger.exception(f"Unhandled error during game simulation: {e}"); return None
 
     def _update_strategy_from_trajectory(self, trajectory: Dict):
-        """ Обновляет сожаления узлов CFR по методу Outcome Sampling MCCFR. """
+        # (Без изменений)
         final_payoff_p0 = trajectory['final_payoff']; num_steps = len(trajectory['states'])
         if num_steps == 0: logger.warning("Empty trajectory update."); return
         for t in range(num_steps):
-            info_hash, player, num_actions = trajectory['states'][t]
-            action_taken_index = trajectory['actions'][t]
-            reach_p0, reach_p1 = trajectory['reach_probs'][t]
-            sampling_prob = trajectory['sampling_probs'][t]
+            info_hash, player, num_actions = trajectory['states'][t]; action_taken_index = trajectory['actions'][t]
+            reach_p0, reach_p1 = trajectory['reach_probs'][t]; sampling_prob = trajectory['sampling_probs'][t]
             node = self.nodes_map.get(info_hash)
-            if node is None: logger.warning(f"Node {info_hash} not found during update."); continue
+            if node is None: continue # logger.warning(f"Node {info_hash} not found during update."); continue
             if node.num_actions == 0: logger.warning(f"Node {info_hash} has 0 actions."); continue
             if node.num_actions != num_actions: logger.error(f"Action count mismatch node {info_hash} ({node.num_actions} vs {num_actions})."); continue
             if action_taken_index < 0 or action_taken_index >= num_actions: logger.error(f"Invalid action index {action_taken_index} for node {info_hash}."); continue
             if sampling_prob < 1e-9: logger.warning(f"Near-zero sampling prob ({sampling_prob:.2E}) for node {info_hash}."); continue
-
             payoff_for_player = final_payoff_p0 if player == 0 else -final_payoff_p0
             reach_opponent = reach_p1 if player == 0 else reach_p0
             update_weight = payoff_for_player * (reach_opponent / sampling_prob)
@@ -1290,7 +1255,7 @@ class CFRAgent:
             node.regret_sum = node.regret_sum + regret_update
 
     def save_progress(self, iterations_completed: int) -> None:
-        """Сохраняет прогресс CFR через GitHub."""
+        # (Без изменений)
         if 'save_ai_progress_to_github' not in globals(): logger.error("github_utils not available."); return
         logger.info(f"Preparing to save progress. Nodes: {len(self.nodes_map)}, Iterations: {iterations_completed}")
         try:
@@ -1299,47 +1264,34 @@ class CFRAgent:
                  regret_list = n.regret_sum.tolist() if n.num_actions > 0 else []
                  strategy_list = n.strategy_sum.tolist() if n.num_actions > 0 else []
                  serializable_nodes[h] = {"regret_sum": regret_list, "strategy_sum": strategy_list, "num_actions": n.num_actions}
-            data_to_save = {
-                "nodes_map_serialized": serializable_nodes, "iterations_completed": iterations_completed,
-                "ai_settings": self.ai_settings, "timestamp": time.time()
-            }
+            data_to_save = {"nodes_map_serialized": serializable_nodes, "iterations_completed": iterations_completed, "ai_settings": self.ai_settings, "timestamp": time.time()}
             logger.info(f"Data prepared ({len(serializable_nodes)} nodes). Calling github_utils...")
             if not save_ai_progress_to_github(data_to_save): logger.error("Saving progress via github_utils failed!")
             else: logger.info("Data passed to github_utils for saving.")
         except Exception as e: logger.exception(f"Unexpected error during save_progress preparation: {e}")
 
     def load_progress(self) -> None:
-        """Загружает прогресс CFR через GitHub."""
+        # (Без изменений)
         if 'load_ai_progress_from_github' not in globals(): logger.error("github_utils not available."); return
         logger.info("Attempting to load AI progress from GitHub...")
         try:
             loaded_data = load_ai_progress_from_github()
             if loaded_data and isinstance(loaded_data, dict) and "nodes_map_serialized" in loaded_data:
-                loaded_nodes_map_serialized = loaded_data["nodes_map_serialized"]
-                loaded_ai_settings = loaded_data.get("ai_settings", {})
-                iterations_completed = loaded_data.get("iterations_completed", 0)
-                timestamp = loaded_data.get("timestamp", 0)
+                loaded_nodes_map_serialized = loaded_data["nodes_map_serialized"]; loaded_ai_settings = loaded_data.get("ai_settings", {}); iterations_completed = loaded_data.get("iterations_completed", 0); timestamp = loaded_data.get("timestamp", 0)
                 logger.info(f"Loaded data. Nodes: {len(loaded_nodes_map_serialized)}, Iterations: {iterations_completed}.")
                 if timestamp > 0: logger.info(f"Data timestamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))}")
-                if loaded_ai_settings != self.ai_settings:
-                    logger.warning("Loaded AI settings differ from current agent settings!")
-                    logger.warning(f"--- Loaded: {loaded_ai_settings}")
-                    logger.warning(f"--- Current: {self.ai_settings}")
-
+                if loaded_ai_settings != self.ai_settings: logger.warning("Loaded AI settings differ from current agent settings!"); logger.warning(f"--- Loaded: {loaded_ai_settings}"); logger.warning(f"--- Current: {self.ai_settings}")
                 self.nodes_map.clear(); num_loaded = 0; num_errors = 0; num_skipped_max_nodes = 0
                 for info_hash_str, node_data in loaded_nodes_map_serialized.items():
                     if len(self.nodes_map) >= self.max_nodes: num_skipped_max_nodes += 1; continue
                     try:
-                        info_hash = int(info_hash_str); num_actions = node_data.get("num_actions")
-                        regret_sum_list = node_data.get("regret_sum"); strategy_sum_list = node_data.get("strategy_sum")
+                        info_hash = int(info_hash_str); num_actions = node_data.get("num_actions"); regret_sum_list = node_data.get("regret_sum"); strategy_sum_list = node_data.get("strategy_sum")
                         if not isinstance(num_actions, int) or num_actions < 0: logger.warning(f"Invalid num_actions ({num_actions}) for {info_hash}. Skip."); num_errors += 1; continue
                         if not isinstance(regret_sum_list, list) or not isinstance(strategy_sum_list, list): logger.warning(f"Invalid sum type for {info_hash}. Skip."); num_errors += 1; continue
                         if num_actions > 0 and (len(regret_sum_list) != num_actions or len(strategy_sum_list) != num_actions): logger.warning(f"Length mismatch for {info_hash}. NA={num_actions}, RL={len(regret_sum_list)}, SL={len(strategy_sum_list)}. Skip."); num_errors += 1; continue
                         node = CFRNode(num_actions)
                         if num_actions > 0:
-                            try:
-                                node.regret_sum = jnp.array(regret_sum_list, dtype=jnp.float32)
-                                node.strategy_sum = jnp.array(strategy_sum_list, dtype=jnp.float32)
+                            try: node.regret_sum = jnp.array(regret_sum_list, dtype=jnp.float32); node.strategy_sum = jnp.array(strategy_sum_list, dtype=jnp.float32)
                             except (ValueError, TypeError) as arr_err: logger.error(f"Error converting arrays for {info_hash}: {arr_err}. Skip."); num_errors += 1; continue
                         self.nodes_map[info_hash] = node; num_loaded += 1
                     except (ValueError, KeyError, TypeError) as e: logger.exception(f"Error processing node '{info_hash_str}': {e}. Skip."); num_errors += 1
@@ -1350,14 +1302,12 @@ class CFRAgent:
         except Exception as e: logger.exception(f"Unexpected error during load_progress: {e}")
 
     def check_convergence(self) -> bool:
-        """ Проверяет сходимость (упрощенная проверка среднего абсолютного сожаления). """
+        # (Без изменений)
         if not self.nodes_map: logger.info("Convergence check: No nodes."); return False
         total_abs_regret = 0.0; total_actions_in_nodes = 0; num_nodes_checked = 0
         for node in self.nodes_map.values():
             if node.num_actions > 0:
-                if node.regret_sum.shape == (node.num_actions,):
-                    total_abs_regret += float(jnp.sum(jnp.abs(node.regret_sum)))
-                    total_actions_in_nodes += node.num_actions; num_nodes_checked += 1
+                if node.regret_sum.shape == (node.num_actions,): total_abs_regret += float(jnp.sum(jnp.abs(node.regret_sum))); total_actions_in_nodes += node.num_actions; num_nodes_checked += 1
                 else: logger.warning(f"Regret sum shape mismatch for node {hash}: expected ({node.num_actions},), got {node.regret_sum.shape}. Skipping.");
         if total_actions_in_nodes == 0: logger.info("Convergence check: No actions in nodes."); return False
         avg_abs_regret_per_action = total_abs_regret / total_actions_in_nodes
@@ -1366,4 +1316,4 @@ class CFRAgent:
         if is_converged: logger.info("Convergence threshold reached!")
         return is_converged
 
-# --- Конец файла ai_engine_v2_refactored.py ---
+# --- Конец файла ai_engine_v3_jit_fixed.py ---
