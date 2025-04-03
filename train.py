@@ -92,19 +92,19 @@ if __name__ == "__main__":
     # --- ВАЖНО: Устанавливаем метод старта multiprocessing ---
     # Делаем это *перед* любым созданием пула процессов (внутри agent.train)
     # и внутри блока if __name__ == "__main__"
-    try:
+   # try:
         # 'spawn' безопаснее для JAX и других библиотек с потоками
-        mp.set_start_method('spawn', force=True)
-        logger.info("Multiprocessing start method set to 'spawn'.")
-    except RuntimeError as e:
+        #mp.set_start_method('spawn', force=True)
+        #logger.info("Multiprocessing start method set to 'spawn'.")
+    #except RuntimeError as e:
         # Контекст может быть уже установлен (например, в некоторых средах)
-        logger.warning(f"Could not set multiprocessing start method (possibly already set): {e}")
-        current_method = mp.get_start_method()
-        logger.info(f"Current multiprocessing start method: '{current_method}'")
-        if current_method != 'spawn':
-             logger.warning("Current start method is not 'spawn', potential issues with JAX might still occur.")
-    except Exception as e:
-        logger.exception("An unexpected error occurred while setting multiprocessing start method.")
+        #logger.warning(f"Could not set multiprocessing start method (possibly already set): {e}")
+        #current_method = mp.get_start_method()
+        #logger.info(f"Current multiprocessing start method: '{current_method}'")
+        #if current_method != 'spawn':
+             #logger.warning("Current start method is not 'spawn', potential issues with JAX might still occur.")
+    #except Exception as e:
+        #logger.exception("An unexpected error occurred while setting multiprocessing start method.")
 
     # Запускаем основную функцию
     main()
