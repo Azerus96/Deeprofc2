@@ -1,7 +1,9 @@
 # ai_engine_v3.1_padding_fix.py
 # Исправлена ошибка NonConcreteBooleanIndexError путем добавления паддинга
 # перед вызовом JIT-функций evaluate_hand_jax/compare_hands_jax.
-# Основано на ai_engine_v3_jit_fixed.py (1319 строк).
+# Добавлена конвертация JAX bool в Python bool в не-JIT функциях.
+# Добавлена нормализация и защита от деления на ноль в CFRNode.
+# Основано на ai_engine_v3_jit_fixed.py.
 
 # --- Стандартные импорты ---
 import itertools
@@ -34,7 +36,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # --- Класс Card ---
-# (Без изменений)
 class Card:
     RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]; SUITS = ["♥", "♦", "♣", "♠"]
     RANK_MAP = {rank: i for i, rank in enumerate(RANKS)}; SUIT_MAP = {suit: i for i, suit in enumerate(SUITS)}
@@ -54,7 +55,6 @@ class Card:
     def get_all_cards() -> List["Card"]: return [Card(r, s) for r in Card.RANKS for s in Card.SUITS]
 
 # --- Класс Hand ---
-# (Без изменений)
 class Hand:
     def __init__(self, cards: Optional[List[Card]] = None): self.cards = cards if cards is not None else []
     def add_card(self, card: Card) -> None:
@@ -84,7 +84,6 @@ class Hand:
          return jnp.array([card_to_array(card) for card in self.cards], dtype=jnp.int32)
 
 # --- Класс Board ---
-# (Без изменений)
 class Board:
     def __init__(self): self.top: List[Card] = []; self.middle: List[Card] = []; self.bottom: List[Card] = []
     def get_placed_count(self) -> int: return len(self.top) + len(self.middle) + len(self.bottom)
@@ -130,7 +129,6 @@ class Board:
         return board
 
 # --- Вспомогательные функции для преобразования Card <-> JAX array ---
-# (Без изменений)
 def card_to_array(card: Optional[Card]) -> jnp.ndarray:
     if card is None: return jnp.array([-1, -1], dtype=jnp.int32)
     return jnp.array([Card.RANK_MAP.get(card.rank, -1), Card.SUIT_MAP.get(card.suit, -1)], dtype=jnp.int32)
@@ -145,7 +143,7 @@ def action_to_jax(action_dict: Dict[str, List[Card]]) -> jnp.ndarray:
     action_array = jnp.full((17, 2), -1, dtype=jnp.int32); idx = 0
     for card in action_dict.get("top", []):
         if idx < 3: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
-    idx = 3; # ... (остальные циклы без изменений) ...
+    idx = 3;
     for card in action_dict.get("middle", []):
         if idx < 8: action_array = action_array.at[idx].set(card_to_array(card)); idx += 1
     idx = 8
@@ -168,7 +166,6 @@ def placement_py_to_jax(placement_list: List[Optional[Card]]) -> jnp.ndarray:
     return jnp.array([card_to_array(c) for c in placement_list], dtype=jnp.int32)
 
 # --- Класс GameState ---
-# (Без изменений по сравнению с v3)
 class GameState:
     def __init__(self, selected_cards: Optional[Union[List[Card], Hand]] = None, board: Optional[Board] = None, discarded_cards: Optional[List[Card]] = None, ai_settings: Optional[Dict] = None, deck: Optional[List[Card]] = None, current_player: int = 0, opponent_board: Optional[Board] = None, opponent_discarded: Optional[List[Card]] = None):
         if isinstance(selected_cards, Hand): self.selected_cards: Hand = selected_cards
@@ -180,17 +177,17 @@ class GameState:
     def is_terminal(self) -> bool: return self.board.is_full()
     def get_street(self) -> int:
         placed = self.board.get_placed_count()
-        if placed == 0: return 1; # ... (остальная логика без изменений) ...
-        if placed == 5: return 2; # ...
-        if placed == 7: return 3; # ...
-        if placed == 9: return 4; # ...
-        if placed == 11: return 5; # ...
-        if placed == 13: return 6; # ...
-        if placed < 5: return 1; # ...
-        if placed < 7: return 2; # ...
-        if placed < 9: return 3; # ...
-        if placed < 11: return 4; # ...
-        if placed < 13: return 5; # ...
+        if placed == 0: return 1;
+        if placed == 5: return 2;
+        if placed == 7: return 3;
+        if placed == 9: return 4;
+        if placed == 11: return 5;
+        if placed == 13: return 6;
+        if placed < 5: return 1;
+        if placed < 7: return 2;
+        if placed < 9: return 3;
+        if placed < 11: return 4;
+        if placed < 13: return 5;
         logger.warning(f"Unexpected placed cards ({placed}) for street calc."); return 0
     def apply_action(self, action: Dict[str, List[Card]]) -> "GameState":
         new_board = Board(); new_board.top = self.board.top[:]; new_board.middle = self.board.middle[:]; new_board.bottom = self.board.bottom[:]
@@ -231,39 +228,34 @@ class GameState:
         pairwise_score = self._calculate_pairwise_score(self.opponent_board)
         return pairwise_score + my_royalty - opp_royalty
     def is_valid_fantasy_entry(self) -> bool:
-        # Используем стандартный Python if, т.к. функция не JIT
         if not self.board.is_full(): return False
         place_jax = self.board.to_jax_placement()
-        if bool(is_dead_hand_jax(place_jax)): return False # Конвертируем JAX bool
-        return bool(is_valid_fantasy_entry_jax(place_jax, self.ai_settings)) # Конвертируем JAX bool
+        if bool(is_dead_hand_jax(place_jax)): return False
+        return bool(is_valid_fantasy_entry_jax(place_jax, self.ai_settings))
     def is_valid_fantasy_repeat(self) -> bool:
-        # Используем стандартный Python if, т.к. функция не JIT
         if not self.board.is_full(): return False
         place_jax = self.board.to_jax_placement()
-        if bool(is_dead_hand_jax(place_jax)): return False # Конвертируем JAX bool
-        return bool(is_valid_fantasy_repeat_jax(place_jax, self.ai_settings)) # Конвертируем JAX bool
+        if bool(is_dead_hand_jax(place_jax)): return False
+        return bool(is_valid_fantasy_repeat_jax(place_jax, self.ai_settings))
     def get_fantasy_cards_count(self) -> int:
-        # Используем стандартный Python if, т.к. функция не JIT
         if not self.board.is_full(): return 0
         place_jax = self.board.to_jax_placement()
         if bool(is_dead_hand_jax(place_jax)): return 0
         return self._get_fantasy_cards_count_jax_logic(place_jax)
     def _get_fantasy_cards_count_jax_logic(self, place_jax: jnp.ndarray) -> int:
-        # Используем стандартный Python if, т.к. функция не JIT
         top_cards_jax = place_jax[0:3]
         if not bool(jnp.sum(jnp.any(top_cards_jax != -1, axis=1)) == 3): return 0
         return self._get_fantasy_cards_count_standard(top_cards_jax)
     def _get_fantasy_cards_count_standard(self, top_cards_jax: jnp.ndarray) -> int:
-        # Эта функция вызывается из Python, поэтому Python if здесь допустим
-        # --- [ИСПРАВЛЕНИЕ v3.1] Добавляем паддинг перед вызовом evaluate_hand_jax ---
         pad_val = jnp.array([-1, -1], dtype=jnp.int32)
         top_padded = jnp.concatenate([top_cards_jax, jnp.full((2, 2), pad_val)], axis=0)
-        top_rank, _ = evaluate_hand_jax(top_padded) # Вызываем с паддингом
-        # --- Конец исправления ---
+        top_rank, _ = evaluate_hand_jax(top_padded)
         fantasy_type = self.ai_settings.get('fantasyType', 'standard')
         if fantasy_type == 'standard':
             is_qualifying_pair = False
+            # Используем JAX для вычислений, но Python if для ветвления
             if int(top_rank) == 8: # Конвертируем JAX скаляр в int
+                # Передаем оригинальный top_cards_jax в _get_rank_counts_jax, т.к. он ожидает (N, 2)
                 rank_counts = _get_rank_counts_jax(top_cards_jax); pair_rank_idx = jnp.argmax(rank_counts == 2)
                 is_qualifying_pair = pair_rank_idx >= Card.RANK_MAP['Q']
             is_trips = (int(top_rank) == 6)
@@ -277,13 +269,13 @@ def _safe_get_counts(values: jnp.ndarray, length: int) -> jnp.ndarray:
     valid_mask = (values >= 0) & (values < length); valid_values = values[valid_mask]
     return lax.cond(valid_values.shape[0] == 0, lambda: jnp.zeros(length, dtype=jnp.int32), lambda: jnp.bincount(valid_values, length=length))
 @jit
-def _get_rank_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray: # Ожидает (5, 2) из-за паддинга
+def _get_rank_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray: # Может принимать (N, 2)
     ranks = cards_jax[:, 0]; valid_mask = ranks != -1
-    return _safe_get_counts(ranks[valid_mask], 13) # Считаем только валидные
+    return _safe_get_counts(ranks[valid_mask], 13)
 @jit
-def _get_suit_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray: # Ожидает (5, 2)
+def _get_suit_counts_jax(cards_jax: jnp.ndarray) -> jnp.ndarray: # Может принимать (N, 2)
     suits = cards_jax[:, 1]; valid_mask = suits != -1
-    return _safe_get_counts(suits[valid_mask], 4) # Считаем только валидные
+    return _safe_get_counts(suits[valid_mask], 4)
 @jit
 def _is_flush_jax(cards_jax: jnp.ndarray) -> bool: # Ожидает (5, 2)
     is_five_cards = cards_jax.shape[0] == 5; suits = cards_jax[:, 1]; valid_mask = suits != -1
@@ -296,7 +288,7 @@ def _is_straight_jax(cards_jax: jnp.ndarray) -> bool: # Ожидает (5, 2)
     is_five_cards = cards_jax.shape[0] == 5; ranks = cards_jax[:, 0]; valid_mask = ranks != -1
     all_valid = jnp.sum(valid_mask) == 5
     def check_straight():
-        valid_ranks = ranks[valid_mask] # Индексация OK для статической формы (5,2)
+        valid_ranks = ranks[valid_mask]
         unique_ranks = jnp.unique(valid_ranks); is_five_unique_ranks = unique_ranks.shape[0] == 5
         sorted_ranks = jnp.sort(unique_ranks)
         is_a5 = jnp.array_equal(sorted_ranks, jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32))
@@ -368,8 +360,10 @@ def evaluate_hand_jax(cards_jax: jnp.ndarray) -> Tuple[int, jnp.ndarray]: # Ож
         combination_rank = _identify_combination_jax(cards_5x2)
         rank_counts = _get_rank_counts_jax(cards_5x2)
         valid_ranks = jnp.where(mask_5, ranks, -1)
-        valid_ranks_only = valid_ranks[valid_ranks != -1] # Фильтруем -1 для сортировки кикеров
+        valid_ranks_only = valid_ranks[valid_ranks != -1]
         sorted_valid_ranks_desc = jnp.sort(valid_ranks_only)[::-1]
+        # Сортируем с -1 для использования в некоторых case
+        sorted_masked_ranks_desc = jnp.sort(valid_ranks)[::-1]
 
         # --- Логика кикеров (адаптирована для nv и использует sorted_valid_ranks_desc) ---
         def case_0_1(): is_a5 = jnp.array_equal(jnp.sort(valid_ranks_only), jnp.array([0, 1, 2, 3, 12], dtype=jnp.int32)); main_kicker = jnp.where(is_a5, 3, sorted_valid_ranks_desc[0]); return default_kickers.at[0].set(main_kicker)
@@ -388,11 +382,11 @@ def evaluate_hand_jax(cards_jax: jnp.ndarray) -> Tuple[int, jnp.ndarray]: # Ож
             pair_rank = jnp.argmax(rank_counts == 2); k = default_kickers.at[0].set(pair_rank)
             num_others = nv - 2
             num_kickers_to_set = jnp.minimum(num_others, 3 if nv == 5 else 1 if nv == 3 else 0)
+            # Берем кикеры из sorted_valid_ranks_desc, пропуская ранг пары
             kickers_available = sorted_valid_ranks_desc[sorted_valid_ranks_desc != pair_rank]
-            # Используем статический размер среза и where
-            indices = jnp.arange(1, 5); kickers_to_set = jnp.pad(kickers_available, (0, 4 - kickers_available.shape[0]), constant_values=-1)[:4]
-            mask_kickers = indices < (1 + num_kickers_to_set)
-            k = k.at[1:5].set(jnp.where(mask_kickers, kickers_to_set, k[1:5]))
+            # Обрезаем до нужного количества и дополняем -1 до 4
+            kickers_padded = jnp.pad(kickers_available[:num_kickers_to_set], (0, 4 - num_kickers_to_set), constant_values=-1)
+            k = k.at[1:5].set(kickers_padded) # Записываем 4 кикера (или -1)
             return k
         def case_default(): # Хай кард
              return default_kickers.at[:nv].set(sorted_valid_ranks_desc[:nv])
@@ -432,8 +426,8 @@ def is_dead_hand_jax(placement: jnp.ndarray) -> bool: # Ожидает (13, 2)
     return is_dead
 
 # --- Python versions ---
-# --- [ИСПРАВЛЕНИЕ v3.1] Добавлен паддинг в _compare_hands_py ---
 def _compare_hands_py(hand1_cards: List[Card], hand2_cards: List[Card]) -> int:
+    # --- [ИСПРАВЛЕНИЕ v3.1] Добавлен паддинг ---
     if not hand1_cards and not hand2_cards: return 0;
     if not hand1_cards: return -1;
     if not hand2_cards: return 1;
@@ -447,19 +441,19 @@ def _compare_hands_py(hand1_cards: List[Card], hand2_cards: List[Card]) -> int:
     while len(hand2_list) < 5: hand2_list.append(pad_val)
     hand1_jax = jnp.stack(hand1_list[:5]); hand2_jax = jnp.stack(hand2_list[:5])
     return int(compare_hands_jax(hand1_jax, hand2_jax))
-# --- Конец исправления ---
+    # --- Конец исправления ---
 def _is_dead_hand_py(board: Board) -> bool:
     top_full = len(board.top) == 3; middle_full = len(board.middle) == 5; bottom_full = len(board.bottom) == 5; is_dead = False
     if top_full and middle_full:
-        if _compare_hands_py(board.top, board.middle) > 0: is_dead = True # Использует _compare_hands_py с паддингом
+        if _compare_hands_py(board.top, board.middle) > 0: is_dead = True
     if middle_full and bottom_full:
-        if _compare_hands_py(board.middle, board.bottom) > 0: is_dead = True # Использует _compare_hands_py с паддингом
+        if _compare_hands_py(board.middle, board.bottom) > 0: is_dead = True
     return is_dead
 
 # --- JIT функции для роялти и фантазии ---
-# --- [ИСПРАВЛЕНИЕ v3.1] Добавлен паддинг перед вызовами evaluate_hand_jax ---
 @jit
 def calculate_royalties_jax(placement_jax: jnp.ndarray, ai_settings: Dict) -> jnp.ndarray:
+    # --- [ИСПРАВЛЕНИЕ v3.1] Добавлен паддинг ---
     top_cards = placement_jax[0:3]; middle_cards = placement_jax[3:8]; bottom_cards = placement_jax[8:13]
     pad_val = jnp.array([-1, -1], dtype=jnp.int32); top_padded = jnp.concatenate([top_cards, jnp.full((2, 2), pad_val)], axis=0)
     is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
@@ -481,8 +475,10 @@ def calculate_royalties_jax(placement_jax: jnp.ndarray, ai_settings: Dict) -> jn
         safe_rank = jnp.clip(bottom_rank, 0, len(bottom_royalties_map) - 1); return bottom_royalties_map[safe_rank]
     bottom_royalty = lax.cond(is_bottom_full, bottom_royalty_calc, lambda: jnp.array(0, dtype=jnp.int32))
     return jnp.array([top_royalty, middle_royalty, bottom_royalty], dtype=jnp.int32)
+    # --- Конец исправления ---
 @jit
 def is_valid_fantasy_entry_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
+    # --- [ИСПРАВЛЕНИЕ v3.1] Добавлен паддинг ---
     top_cards = placement[0:3]; pad_val = jnp.array([-1, -1], dtype=jnp.int32); top_padded = jnp.concatenate([top_cards, jnp.full((2, 2), pad_val)], axis=0)
     is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3
     def check_fantasy():
@@ -490,8 +486,10 @@ def is_valid_fantasy_entry_jax(placement: jnp.ndarray, ai_settings: Dict) -> boo
         is_qualifying_pair = lax.cond(top_rank == 8, lambda: jnp.argmax(_get_rank_counts_jax(top_cards) == 2) >= Card.RANK_MAP['Q'], lambda: False)
         is_trips = top_rank == 6; return is_trips | is_qualifying_pair
     return lax.cond(is_top_full, check_fantasy, lambda: False)
+    # --- Конец исправления ---
 @jit
 def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bool:
+    # --- [ИСПРАВЛЕНИЕ v3.1] Добавлен паддинг ---
     top_cards = placement[0:3]; bottom_cards = placement[8:13]; pad_val = jnp.array([-1, -1], dtype=jnp.int32); top_padded = jnp.concatenate([top_cards, jnp.full((2, 2), pad_val)], axis=0)
     is_top_full = jnp.sum(jnp.any(top_cards != -1, axis=1)) == 3; is_bottom_full = jnp.sum(jnp.any(bottom_cards != -1, axis=1)) == 5
     def check_repeat():
@@ -499,10 +497,9 @@ def is_valid_fantasy_repeat_jax(placement: jnp.ndarray, ai_settings: Dict) -> bo
         trips_on_top = top_rank == 6; quads_or_better_on_bottom = bottom_rank <= 2
         return trips_on_top | quads_or_better_on_bottom
     return lax.cond(is_top_full & is_bottom_full, check_repeat, lambda: False)
-# --- Конец исправления ---
+    # --- Конец исправления ---
 
 # --- Функции генерации действий ---
-# (Без изменений по сравнению с v3)
 def _is_board_valid_py(board: Board) -> bool:
     middle_ok = True
     if board.top and board.middle:
@@ -653,7 +650,7 @@ def heuristic_baseline_evaluation(state: GameState, ai_settings: Dict) -> float:
                     cards_jax = jnp.array([card_to_array(c) for c in cards_list_padded[:target_len]], dtype=jnp.int32)
                 # --- Конец исправления ---
 
-                rank, kickers = evaluate_hand_jax(cards_jax) # Вызываем с паддингом
+                rank, kickers = evaluate_hand_jax(cards_jax)
                 safe_rank = jnp.clip(rank, 0, len(COMBINATION_WEIGHTS) - 1); row_score += float(COMBINATION_WEIGHTS[safe_rank])
                 row_score += float(jnp.sum(kickers[kickers != -1])) * 0.01
             else: row_score += _evaluate_partial_combination_py(cards_list, row_name)
@@ -671,7 +668,6 @@ def heuristic_baseline_evaluation(state: GameState, ai_settings: Dict) -> float:
     return total_score
 
 # --- Класс CFRNode ---
-# (Добавлена нормализация стратегий для большей надежности)
 class CFRNode:
     def __init__(self, num_actions: int):
         if num_actions < 0: raise ValueError("Number of actions cannot be negative")
@@ -701,7 +697,6 @@ class CFRNode:
         return avg_strategy
 
 # --- Класс CFRAgent ---
-# (Изменения в _play_one_game_for_cfr для конвертации JAX bool в Python bool)
 class CFRAgent:
     def __init__(self, iterations: int = 1000000, stop_threshold: float = 0.001, batch_size: int = 64, max_nodes: int = 1000000, ai_settings: Optional[Dict] = None, num_workers: Optional[int] = None):
         self.iterations = iterations; self.stop_threshold = stop_threshold; self.save_interval = 2000; self.convergence_check_interval = 50000
@@ -917,11 +912,9 @@ class CFRAgent:
             if sampling_prob < 1e-9: logger.warning(f"Near-zero sampling prob ({sampling_prob:.2E}) for node {info_hash}."); continue
             payoff_for_player = final_payoff_p0 if player == 0 else -final_payoff_p0; reach_opponent = reach_p1 if player == 0 else reach_p0
             update_weight = payoff_for_player * (reach_opponent / sampling_prob)
-            # Используем get_strategy для получения текущей стратегии (она нормализована)
             current_strategy = node.get_strategy(0.0) # Не обновляем strategy_sum здесь
             indicator = jnp.zeros(num_actions, dtype=jnp.float32).at[action_taken_index].set(1.0); regret_update = update_weight * (indicator - current_strategy)
             node.regret_sum = node.regret_sum + regret_update
-            # Обновление strategy_sum происходит в get_strategy при выборе хода в симуляции
     def save_progress(self, iterations_completed: int) -> None:
         if 'save_ai_progress_to_github' not in globals(): logger.error("github_utils not available."); return
         logger.info(f"Preparing to save progress. Nodes: {len(self.nodes_map)}, Iterations: {iterations_completed}")
@@ -972,7 +965,6 @@ class CFRAgent:
                 if node.regret_sum.shape == (node.num_actions,): total_abs_regret += float(jnp.sum(jnp.abs(node.regret_sum))); total_actions_in_nodes += node.num_actions; num_nodes_checked += 1
                 else: logger.warning(f"Regret sum shape mismatch for node {hash}: expected ({node.num_actions},), got {node.regret_sum.shape}. Skipping.");
         if total_actions_in_nodes == 0: logger.info("Convergence check: No actions in nodes."); return False
-        # Добавим защиту от деления на ноль
         avg_abs_regret_per_action = total_abs_regret / total_actions_in_nodes if total_actions_in_nodes > 0 else 0.0
         logger.info(f"Convergence check: Avg absolute regret per action = {avg_abs_regret_per_action:.6f} (Threshold: {self.stop_threshold}) over {num_nodes_checked} nodes.")
         is_converged = avg_abs_regret_per_action < self.stop_threshold
